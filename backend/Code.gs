@@ -1743,15 +1743,23 @@ function getOpportunityData() {
     const verdict = deep ? String(deep.verdict).toUpperCase() : '';
     if (verdict === 'AVOID') return;                       // hard block
 
-    const valuationScore = Math.min(Math.abs(toNum_(o.pe_discount_pct) || 0) * 1.5, 60);
-    let fundamentalScore = 0;
+    // Continuous valuation confidence (differentiates every stock).
+    let score = calculateValuationConfidence_({
+      discountPct: o.pe_discount_pct,        // PE-vs-avg discount or 52w drawdown (negative = cheap)
+      currentPE: o.current_pe,
+      avgPE: o.avg_pe_5yr,
+      riskReward: o.risk_reward_ratio,
+      profitable: true                       // every candidate passed screening
+    });
+
+    // Verdict adjustment from the Claude analysis (STRONG bonus / WEAK penalty).
     let ageDays = null, stale = false;
     if (deep) {
-      const conf = toNum_(deep.confidence) || 0;
+      if (verdict === 'STRONG')       score += 12;
+      else if (verdict === 'WEAK')    score -= 25;          // MODERATE = neutral (0)
       const redCount = deep.red_flags ? String(deep.red_flags).split('|').filter(function (s) { return s.trim(); }).length : 0;
-      fundamentalScore = Math.max(0, (conf / 100) * 40 - redCount * 3);
+      score -= Math.min(10, redCount * 2);                  // each red flag shaves a little
       if (verdict === 'WEAK') {
-        fundamentalScore *= 0.3;
         o.valuation_status = 'WATCH';                       // value-trap guard: not a "BUY"
         o.weak = true;
       }
@@ -1760,12 +1768,15 @@ function getOpportunityData() {
         if (!isNaN(d)) { ageDays = Math.round((today - d) / 86400000); stale = ageDays > 90; }
       }
     }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
     o.deep = deep;
     o.analyzed = !!deep;
     o.verdict = verdict;
     o.fundamentals_age_days = ageDays;
     o.fundamentals_stale = stale;
-    o.final_score = round2_(valuationScore + fundamentalScore);
+    o.confidence_score = score;              // differentiated, verdict-aware (overrides the screen proxy)
+    o.final_score = score;                   // ranking = the same score
     merged.push(o);
   });
 
@@ -2137,6 +2148,41 @@ function calculateValuationStatusGF_(price, high52, cfg) {
   else if (dd <= -3)                   status = 'FAIR_VALUE';
   else                                 status = 'EXPENSIVE';
   return { status: status, discountPct: dd, ratio: null, basis: '52w_drawdown' };
+}
+
+// Continuous 0-100 confidence — every input scales smoothly so two cheap stocks
+// no longer collapse to the same banded number. Components (pre-verdict):
+//   discount  (max 40) — magnitude of PE-vs-avg discount OR 52w drawdown
+//   peCheap   (max 25) — absolute PE attractiveness (lower = higher)
+//   riskReward(max 20) — reward asymmetry to target
+//   base      (max 10) — profitable & priced (passed screening)
+// The Claude verdict adjustment (+STRONG / 0 MODERATE / -WEAK, minus red flags)
+// is applied separately in getOpportunityData where the analysis is joined.
+function calculateValuationConfidence_(o) {
+  let s = 0;
+
+  // 1. How far below fair value — bigger discount/drawdown scores higher (max 40).
+  const discMag = Math.min(50, Math.max(0, -(toNum_(o.discountPct) || 0)));
+  s += (discMag / 50) * 40;
+
+  // 2. PE attractiveness vs own 5yr average if known, else an absolute band (max 25).
+  const pe = toNum_(o.currentPE);
+  const avg = toNum_(o.avgPE);
+  if (avg && avg > 0 && pe && pe > 0) {
+    const peDisc = Math.min(50, Math.max(0, (1 - pe / avg) * 100));
+    s += (peDisc / 50) * 25;
+  } else if (pe && pe > 0) {
+    s += Math.min(25, Math.max(0, ((40 - pe) / 40) * 25));
+  }
+
+  // 3. Risk:reward — RR 1 -> 0, RR 3+ -> full (max 20).
+  const rr = toNum_(o.riskReward);
+  if (rr) s += Math.min(20, Math.max(0, ((rr - 1) / 2) * 20));
+
+  // 4. Profitable & priced baseline (max 10).
+  if (o.profitable) s += 10;
+
+  return Math.round(Math.min(100, Math.max(0, s)));
 }
 
 // GF-mode fundamental row for one stock. Nifty 100 are pre-vetted large caps,

@@ -108,6 +108,8 @@ function defaultConfig_() {
   return [
     ['phase_capital_limit', 25000],
     ['max_opportunities', 5],
+    ['candidate_pool_size', 10],
+    ['max_per_sector', 3],
     ['stop_loss_pct', 12],
     ['target_1_pct', 20],
     ['target_2_pct', 35],
@@ -1254,7 +1256,21 @@ function runOpportunityMonitor() {
   }
 
   candidates.sort(function (a, b) { return b._composite - a._composite; });
-  const top = candidates.slice(0, cfg.max_opportunities);
+
+  // Surface a wider candidate pool (default 10) with a per-sector cap (default 3)
+  // so the list can't be dominated by one beaten-down sector. The final 5
+  // shortlist is chosen later by getOpportunityData once fundamentals are in.
+  const poolSize = cfg.candidate_pool_size || 10;
+  const perSectorCap = cfg.max_per_sector || 3;
+  const sectorCount = {};
+  const top = [];
+  for (let k = 0; k < candidates.length && top.length < poolSize; k++) {
+    const c = candidates[k];
+    const sec = c.sector || 'Other';
+    if ((sectorCount[sec] || 0) >= perSectorCap) continue;   // sector full -> skip
+    sectorCount[sec] = (sectorCount[sec] || 0) + 1;
+    top.push(c);
+  }
 
   // Detect newly appearing symbols for NEW_OPPORTUNITY alerts.
   const prev = {};
@@ -1783,11 +1799,16 @@ function getScreenerData() {
 /**
  * Opportunities enriched at read time with the manual Claude deep analysis:
  * each row gets a `deep` object, a combined `final_score`, an `analyzed` flag
- * and a `fundamentals_age_days`. AVOID-verdict names are dropped; the list is
- * re-ranked by final_score. The stored tab stays valuation-only (source of the
- * 5 picks); this join is what the dashboard renders.
+ * and a `fundamentals_age_days`. Then:
+ *   - AVOID verdicts are dropped entirely (hard block);
+ *   - WEAK verdicts get a value-trap guard: display status forced to WATCH and
+ *     score heavily cut (so a cheap-but-weak name can't masquerade as a BUY);
+ *   - the list is ranked by final_score and the top `max_opportunities` (5) are
+ *     flagged `shortlisted` — the rest (up to candidate_pool_size, 10) are bench;
+ *   - `noConviction` is set if every analyzed name is WEAK (→ "hold cash").
  */
 function getOpportunityData() {
+  const cfg = getConfig();
   const rows = readTabObjects_(TAB_OPPORTUNITIES).map(function (r) { delete r.__row; return r; });
   const deepMap = getDeepAnalysis().bySymbol;
   const today = new Date();
@@ -1795,8 +1816,8 @@ function getOpportunityData() {
   const merged = [];
   rows.forEach(function (o) {
     const deep = deepMap[o.symbol] || null;
-    // Hard block: never surface an AVOID verdict regardless of cheapness.
-    if (deep && String(deep.verdict).toUpperCase() === 'AVOID') return;
+    const verdict = deep ? String(deep.verdict).toUpperCase() : '';
+    if (verdict === 'AVOID') return;                       // hard block
 
     const valuationScore = Math.min(Math.abs(toNum_(o.pe_discount_pct) || 0) * 1.5, 60);
     let fundamentalScore = 0;
@@ -1805,7 +1826,11 @@ function getOpportunityData() {
       const conf = toNum_(deep.confidence) || 0;
       const redCount = deep.red_flags ? String(deep.red_flags).split('|').filter(function (s) { return s.trim(); }).length : 0;
       fundamentalScore = Math.max(0, (conf / 100) * 40 - redCount * 3);
-      if (String(deep.verdict).toUpperCase() === 'WEAK') fundamentalScore *= 0.3;
+      if (verdict === 'WEAK') {
+        fundamentalScore *= 0.3;
+        o.valuation_status = 'WATCH';                       // value-trap guard: not a "BUY"
+        o.weak = true;
+      }
       if (deep.analysis_date) {
         const d = new Date(deep.analysis_date);
         if (!isNaN(d)) { ageDays = Math.round((today - d) / 86400000); stale = ageDays > 90; }
@@ -1813,6 +1838,7 @@ function getOpportunityData() {
     }
     o.deep = deep;
     o.analyzed = !!deep;
+    o.verdict = verdict;
     o.fundamentals_age_days = ageDays;
     o.fundamentals_stale = stale;
     o.final_score = round2_(valuationScore + fundamentalScore);
@@ -1820,14 +1846,21 @@ function getOpportunityData() {
   });
 
   merged.sort(function (a, b) { return b.final_score - a.final_score; });
-  merged.forEach(function (o, i) { o.rank = i + 1; });
+  const shortlistN = cfg.max_opportunities || 5;
+  merged.forEach(function (o, i) { o.rank = i + 1; o.shortlisted = i < shortlistN; });
+
+  const analyzed = merged.filter(function (o) { return o.analyzed; });
+  const anyConviction = analyzed.some(function (o) { return o.verdict === 'STRONG' || o.verdict === 'MODERATE'; });
+  const noConviction = analyzed.length > 0 && !anyConviction;
 
   let last = '';
   rows.forEach(function (r) { if (r.last_updated && String(r.last_updated) > last) last = String(r.last_updated); });
   return {
     opportunities: merged,
     count: merged.length,
-    analyzedCount: merged.filter(function (o) { return o.analyzed; }).length,
+    shortlistSize: shortlistN,
+    analyzedCount: analyzed.length,
+    noConviction: noConviction,
     lastUpdated: last
   };
 }

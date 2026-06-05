@@ -125,7 +125,7 @@
   <div class="spread" style="margin-bottom:14px;">
     <div>
       <h1>StockIQ <span class="pill blue" id="modeBadge" style="vertical-align:middle;">…</span></h1>
-      <div class="sub">Nifty 100 large-cap intelligence · max 5 high-conviction ideas</div>
+      <div class="sub">Nifty 100 large-cap intelligence · 10 candidates → shortlist 5</div>
     </div>
     <div class="row">
       <button class="btn" onclick="setTokenPrompt()" title="Set write token">🔑</button>
@@ -353,8 +353,9 @@ async function loadOpportunities() {
   try {
     const d = await api("getOpportunityData");
     OPP_SYMBOLS = d.opportunities.map(o => o.symbol);
-    const analyzed = d.analyzedCount || 0;
-    document.getElementById("oppCount").textContent = d.count ? "("+d.count+" of max 5 · 🔬"+analyzed+" analyzed)" : "";
+    const analyzed = d.analyzedCount || 0, n = d.shortlistSize || 5;
+    document.getElementById("oppCount").textContent =
+      d.count ? "("+d.count+" candidates · top "+n+" shortlisted · 🔬"+analyzed+" analyzed)" : "";
     document.getElementById("oppFresh").textContent = d.lastUpdated ? "screened "+ago(toISO(d.lastUpdated)) : "";
     document.getElementById("deepPanel").style.display = d.count ? "block" : "none";
     if (!d.opportunities.length) {
@@ -362,7 +363,19 @@ async function loadOpportunities() {
         '<div class="center">No opportunities meet the criteria right now.<br><span class="sub">This is intentional — quality over quantity. Capital waits.</span></div>';
       return;
     }
-    document.getElementById("oppBody").innerHTML = '<div class="opps">' + d.opportunities.map(oppCard).join("") + '</div>';
+    const shortlist = d.opportunities.filter(o => o.shortlisted);
+    const bench = d.opportunities.filter(o => !o.shortlisted);
+    let html = "";
+    if (d.noConviction) {
+      html += '<div class="err" style="margin-bottom:12px;">⚠️ No high-conviction ideas right now — every analyzed name looks fundamentally weak. Holding cash is a valid move; don\'t force a buy.</div>';
+    }
+    html += '<div class="sub" style="margin:4px 0 8px;">★ SHORTLIST — best '+n+' by valuation + fundamentals</div>';
+    html += '<div class="opps">' + shortlist.map(oppCard).join("") + '</div>';
+    if (bench.length) {
+      html += '<div class="sub" style="margin:16px 0 8px;">Bench — also cheap; analyze fundamentals, may rotate into the shortlist</div>';
+      html += '<div class="opps">' + bench.map(oppCard).join("") + '</div>';
+    }
+    document.getElementById("oppBody").innerHTML = html;
   } catch(e){ errBox("oppBody", e); }
 }
 function oppCard(o) {
@@ -371,7 +384,7 @@ function oppCard(o) {
   const valLine = usingDD
     ? '<div class="kv"><span class="lbl">Off 52wk high</span><span class="'+(Number(o.pe_discount_pct)<0?'v pos':'')+'">'+disc+'</span></div>'
     : '<div class="kv"><span class="lbl">Avg PE</span><span>'+fmt(o.avg_pe_5yr,1)+'x <span class="'+(Number(o.pe_discount_pct)<0?'v pos':'')+'">('+disc+')</span></span></div>';
-  const mark = o.analyzed ? '🔬' : '⚠️';
+  const mark = (o.shortlisted ? '★ ' : '') + (o.analyzed ? '🔬' : '⚠️');
   return '<div class="card '+o.valuation_status+'">'+
     '<div class="head"><div><div class="sym">'+mark+' '+o.symbol+'</div><div class="sub" style="color:rgba(255,255,255,.75)">'+(o.sector||"")+'</div><div class="price">'+rupee(o.current_price)+'</div></div>'+
       '<span class="pill grey" style="background:rgba(255,255,255,.18);color:#fff;">'+o.valuation_status.replace("_"," ")+'</span></div>'+

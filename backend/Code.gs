@@ -107,6 +107,7 @@ function defaultConfig_() {
   sixMonths.setMonth(sixMonths.getMonth() + 6);
   return [
     ['phase_capital_limit', 25000],
+    ['universe', 'NIFTY50'],             // 'NIFTY50' (safer, default) or 'NIFTY100'
     ['max_opportunities', 5],
     ['candidate_pool_size', 10],
     ['max_per_sector', 3],
@@ -275,6 +276,27 @@ function getStockMeta_(symbol) {
     if (NIFTY100[i].symbol === symbol) return NIFTY100[i];
   }
   return null;
+}
+
+// Approximate Nifty 50 membership (index rebalances periodically — adjust here
+// if it drifts). When config.universe = 'NIFTY50', screening is limited to these.
+const NIFTY50_SET = {
+  TCS:1, INFY:1, WIPRO:1, HCLTECH:1, TECHM:1, LTIM:1,
+  HDFCBANK:1, ICICIBANK:1, SBIN:1, KOTAKBANK:1, AXISBANK:1, INDUSINDBK:1,
+  BAJFINANCE:1, BAJAJFINSV:1, HDFCLIFE:1, SBILIFE:1,
+  ITC:1, HINDUNILVR:1, NESTLEIND:1, BRITANNIA:1, TATACONSUM:1,
+  MARUTI:1, TATAMOTORS:1, 'M&M':1, 'BAJAJ-AUTO':1, HEROMOTOCO:1, EICHERMOT:1,
+  SUNPHARMA:1, DRREDDY:1, CIPLA:1, APOLLOHOSP:1,
+  RELIANCE:1, ONGC:1, BPCL:1, POWERGRID:1, NTPC:1, ADANIPORTS:1,
+  TATASTEEL:1, HINDALCO:1, JSWSTEEL:1, COALINDIA:1,
+  ULTRACEMCO:1, BHARTIARTL:1, LT:1, TITAN:1, TRENT:1, ASIANPAINT:1
+};
+
+/** The active screening universe per config.universe ('NIFTY50' default). */
+function activeUniverse_(cfg) {
+  cfg = cfg || getConfig();
+  if (String(cfg.universe).toUpperCase() === 'NIFTY100') return NIFTY100;
+  return NIFTY100.filter(function (m) { return NIFTY50_SET[m.symbol]; });
 }
 
 /* ----------------------------------------------------------------------------
@@ -1158,7 +1180,7 @@ function runFundamentalScreener(symbols) {
   const cfg = getConfig();
   const universe = (symbols && symbols.length)
     ? NIFTY100.filter(function (m) { return symbols.indexOf(m.symbol) >= 0; })
-    : NIFTY100;
+    : activeUniverse_(cfg);
 
   log_('runFundamentalScreener: ' + universe.length + ' stocks');
   const counts = { total: universe.length, passed: 0, failed: 0, insufficient: 0 };

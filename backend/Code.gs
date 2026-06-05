@@ -1921,12 +1921,8 @@ function doPost(e) {
   return handleAction_(action, data);
 }
 
-// Actions that mutate real money / config. Gated by a shared token when the
-// app is exposed publicly (e.g. GitHub Pages). See getApiToken_/TEST_setApiToken.
-const GATED_ACTIONS = {
-  addPosition: 1, bookProfit: 1, updateConfig: 1,
-  setupStockIQ: 1, setupTimeTriggers: 1
-};
+// Actions that are never gated (liveness check used before a key is entered).
+const OPEN_ACTIONS = { ping: 1 };
 
 function getApiToken_() {
   try { return (PropertiesService.getScriptProperties().getProperty('api_token') || '').trim(); }
@@ -1936,19 +1932,15 @@ function getApiToken_() {
 function handleAction_(action, data) {
   let result;
   try {
-    // Token gate for sensitive writes. If no token is configured, sensitive
-    // writes are blocked over HTTP (editor TEST_* runs are unaffected) so a
-    // public URL can never touch the real ledger by default.
-    if (GATED_ACTIONS[action]) {
-      const tok = getApiToken_();
+    // Whole-app gate: when api_token is configured, EVERY HTTP action (reads
+    // included) requires the matching token, so a public URL is fully locked
+    // until the key is entered. Editor TEST_* runs bypass this. A wrong/missing
+    // token returns the literal 'unauthorized' so the frontend gate can detect it.
+    const tok = getApiToken_();
+    if (tok && !OPEN_ACTIONS[action]) {
       const provided = data && data.token;
-      if (!tok) {
-        return jsonOut_({ success: false, action: action, timestamp: nowISO_(),
-          error: 'Writes are locked. Run TEST_setApiToken("your-secret") once in the editor, then enter the same token in the app (🔑).' });
-      }
       if (provided !== tok) {
-        return jsonOut_({ success: false, action: action, timestamp: nowISO_(),
-          error: 'Unauthorized — token missing or incorrect.' });
+        return jsonOut_({ success: false, action: action, timestamp: nowISO_(), error: 'unauthorized' });
       }
     }
     switch (action) {

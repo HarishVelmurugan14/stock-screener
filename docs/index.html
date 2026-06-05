@@ -18,19 +18,19 @@
 <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
+
+<!-- Top navigation -->
+<nav class="top-nav">
+  <div class="app-logo">StockIQ <span class="pill blue mode-badge" id="modeBadge">…</span></div>
+  <div class="row">
+    <button class="btn" id="tokenBtn" title="Change API key">🔑</button>
+    <button class="btn" id="refreshAll">↻ Refresh</button>
+  </div>
+</nav>
+
 <div class="wrap">
 
-  <!-- Header -->
-  <div class="spread mb-14">
-    <div>
-      <h1>StockIQ <span class="pill blue mode-badge" id="modeBadge">…</span></h1>
-      <div class="sub">Nifty 50 large-cap intelligence · 10 candidates → shortlist 5</div>
-    </div>
-    <div class="row">
-      <button class="btn" id="tokenBtn" title="Set write token">🔑</button>
-      <button class="btn" id="refreshAll">↻ Refresh</button>
-    </div>
-  </div>
+  <div class="sub mb-14">Nifty 50 large-cap intelligence · 10 candidates → shortlist 5</div>
 
   <!-- Section 1 — Market Health -->
   <div class="panel">
@@ -136,6 +136,18 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Key gate — blocks the app until a valid key is entered -->
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <div class="gate-icon">🔑</div>
+    <div class="gate-title">StockIQ</div>
+    <div class="gate-sub">Enter your API key to continue</div>
+    <div class="gate-err hidden" id="gateErr">Invalid key — try again</div>
+    <input class="gate-input" id="gateInput" type="password" placeholder="Paste your API key" autocomplete="off" />
+    <button class="gate-btn" id="gateBtn">Unlock</button>
+  </div>
+</div>
 
 <script src="js/config.js"></script>
 <script src="js/api.js"></script>

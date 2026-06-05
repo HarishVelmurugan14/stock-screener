@@ -500,9 +500,52 @@ async function confirmAdd() {
   }
 }
 
+// ── Key gate ────────────────────────────────────────────────────────────────
+function showGate(invalid) {
+  const gate = document.getElementById('gate');
+  document.getElementById('gateErr').classList.toggle('hidden', !invalid);
+  gate.classList.add('show');
+  const input = document.getElementById('gateInput');
+  input.value = '';
+  input.focus();
+}
+
+// Validate the entered key with one real call. 'unauthorized' -> reject;
+// success -> unlock; any other (network) error -> let in, matching VaultZero.
+async function tryUnlock() {
+  const input = document.getElementById('gateInput');
+  const btn = document.getElementById('gateBtn');
+  const key = input.value.trim();
+  if (!key) return;
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  localStorage.setItem('stockiq_token', key);
+  try {
+    await api('getConfig');
+    document.getElementById('gate').classList.remove('show');
+    loadAll();
+  } catch (e) {
+    if (e.message === 'unauthorized') {
+      localStorage.removeItem('stockiq_token');
+      showGate(true);
+    } else {
+      document.getElementById('gate').classList.remove('show');
+      loadAll();
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Unlock';
+  }
+}
+
+function reKey() {
+  localStorage.removeItem('stockiq_token');
+  showGate(false);
+}
+
 // ── Event wiring ────────────────────────────────────────────────────────────
 function wireEvents() {
-  document.getElementById('tokenBtn').addEventListener('click', setTokenPrompt);
+  document.getElementById('tokenBtn').addEventListener('click', reKey);
   document.getElementById('refreshAll').addEventListener('click', loadAll);
   document.getElementById('copyPromptBtn').addEventListener('click', copyDeepPrompt);
   document.getElementById('saveDeepBtn').addEventListener('click', saveDeep);
@@ -512,6 +555,8 @@ function wireEvents() {
   document.getElementById('mCancel').addEventListener('click', closeModal);
   document.getElementById('mConfirm').addEventListener('click', confirmAdd);
   document.getElementById('mQty').addEventListener('input', mCalc);
+  document.getElementById('gateBtn').addEventListener('click', tryUnlock);
+  document.getElementById('gateInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
   ['scrSector', 'scrStatus', 'scrSort'].forEach(id => {
     document.getElementById(id).addEventListener('change', renderScreener);
   });
@@ -543,5 +588,10 @@ window.addEventListener('DOMContentLoaded', () => {
       '<div class="err mb-14">Set <b>WEB_APP_URL</b> in <code>js/config.js</code> to your Apps Script Web App URL, then reload.</div>');
   }
   wireEvents();
+  // Gate first: block the app until a key is present (VaultZero behaviour).
+  if (!localStorage.getItem('stockiq_token')) {
+    showGate(false);
+    return;
+  }
   loadAll();
 });

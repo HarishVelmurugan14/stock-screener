@@ -17,22 +17,10 @@ async function api(action, dataObj) {
   const res = await fetch(url, { method: 'GET', redirect: 'follow' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const json = await res.json();
-  if (!json.success) throw new Error(json.error || 'Request failed');
-  return json.data;
-}
-
-// ── Write token ─────────────────────────────────────────────────────────────
-function setTokenPrompt() {
-  const cur = localStorage.getItem('stockiq_token') || '';
-  const t = prompt(
-    'Write token — must match the one set via TEST_setApiToken() in Apps Script.\n' +
-    'Leave blank to clear. (Stored only in this browser.)', cur);
-  if (t === null) return;
-  if (t.trim()) {
-    localStorage.setItem('stockiq_token', t.trim());
-    toast('Token saved on this device');
-  } else {
-    localStorage.removeItem('stockiq_token');
-    toast('Token cleared');
+  if (!json.success) {
+    // A stale/wrong stored key surfaces the gate again from anywhere.
+    if (json.error === 'unauthorized' && typeof showGate === 'function') showGate(true);
+    throw new Error(json.error || 'Request failed');
   }
+  return json.data;
 }

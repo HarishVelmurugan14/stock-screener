@@ -6,8 +6,11 @@ frontend. No Python, Node, or frameworks.
 
 ```
 stock-screener/
-├── backend/Code.gs   → Google Apps Script (deploy as Web App)
-└── docs/index.html   → dashboard (served by GitHub Pages; also opens locally)
+├── backend/Code.gs        → Google Apps Script (deploy as Web App)
+└── docs/                  → dashboard (served by GitHub Pages, main /docs)
+    ├── index.html         → markup
+    ├── css/styles.css     → styles
+    └── js/{config,api,app}.js  → config, API layer, app logic
 ```
 
 - **Backend** reads/writes a Google Sheet and pulls market data via

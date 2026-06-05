@@ -1,24 +1,6 @@
-/**
- * ============================================================================
- *  StockIQ — Stock Intelligence System (Google Apps Script backend)
- * ============================================================================
- *  A screener + opportunity monitor + portfolio tracker for the Indian
- *  large-cap (Nifty 100) market. Deployed as a Web App; data lives in a
- *  Google Sheet; the frontend (index.html) talks to doGet().
- *
- *  DESIGN RULES (enforced throughout):
- *   - Config-driven: every threshold is read from the SCREENER_CONFIG tab.
- *   - Read-only on VaultZero tabs (assets/transactions/categories/...).
- *   - Idempotent writes: never duplicate rows.
- *   - Graceful degradation: cached data on source failure; never hallucinate.
- *   - Paper-trade protection: real-money tabs only touched when mode = FALSE.
- *   - Logging: Logger.log() at every major step.
- * ============================================================================
- */
+// StockIQ — Google Apps Script backend
 
-/* ----------------------------------------------------------------------------
- *  GLOBAL CONSTANTS
- * ------------------------------------------------------------------------- */
+// ── GLOBAL CONSTANTS ─────────────────────────────────────────────────────────
 
 const SHEET_ID = '1R4yXbxb6YgXh-rDqnnw3iWOZe2ABcYMD96iN5hvDi5A';
 
@@ -137,12 +119,10 @@ function defaultConfig_() {
   ];
 }
 
-/* ----------------------------------------------------------------------------
- *  NIFTY 100 UNIVERSE
- *  { symbol, name, sector, isBanking }
- *  symbol = NSE/screener.in consolidated code. isBanking exempts the stock
- *  from the debt/equity filter (banks carry structurally high leverage).
- * ------------------------------------------------------------------------- */
+// ── NIFTY 100 UNIVERSE ───────────────────────────────────────────────────────
+//  { symbol, name, sector, isBanking }
+//  symbol = NSE/screener.in consolidated code. isBanking exempts the stock
+//  from the debt/equity filter (banks carry structurally high leverage).
 
 const NIFTY100 = [
   // IT
@@ -292,16 +272,14 @@ const NIFTY50_SET = {
   ULTRACEMCO:1, BHARTIARTL:1, LT:1, TITAN:1, TRENT:1, ASIANPAINT:1
 };
 
-/** The active screening universe per config.universe ('NIFTY50' default). */
+// The active screening universe per config.universe ('NIFTY50' default).
 function activeUniverse_(cfg) {
   cfg = cfg || getConfig();
   if (String(cfg.universe).toUpperCase() === 'NIFTY100') return NIFTY100;
   return NIFTY100.filter(function (m) { return NIFTY50_SET[m.symbol]; });
 }
 
-/* ----------------------------------------------------------------------------
- *  LOW-LEVEL UTILITIES
- * ------------------------------------------------------------------------- */
+// ── LOW-LEVEL UTILITIES ──────────────────────────────────────────────────────
 
 function log_(msg)  { Logger.log('[StockIQ] ' + msg); }
 
@@ -315,7 +293,7 @@ function fmtDateTime_(d) {
   return Utilities.formatDate(d, 'Asia/Kolkata', 'yyyy-MM-dd HH:mm');
 }
 
-/** Parse a number from messy strings ("1,234.5", "12%", "-"). Null if not numeric. */
+// Parse a number from messy strings ("1,234.5", "12%", "-"). Null if not numeric.
 function toNum_(v) {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return isFinite(v) ? v : null;
@@ -332,7 +310,7 @@ function round2_(n) {
 
 function pct_(n) { return round2_(n); }
 
-/** Mean of numeric values, ignoring nulls. Null if none. */
+// Mean of numeric values, ignoring nulls. Null if none.
 function mean_(arr) {
   const xs = (arr || []).filter(function (x) { return x !== null && x !== undefined && isFinite(x); });
   if (!xs.length) return null;
@@ -350,13 +328,11 @@ function stdDev_(arr) {
   return Math.sqrt(acc / (xs.length - 1));
 }
 
-/* ----------------------------------------------------------------------------
- *  SHEET ACCESS HELPERS
- * ------------------------------------------------------------------------- */
+// ── SHEET ACCESS HELPERS ─────────────────────────────────────────────────────
 
 function ss_() { return SpreadsheetApp.openById(SHEET_ID); }
 
-/** Get a tab, creating it with headers if it is one of ours and missing. */
+// Get a tab, creating it with headers if it is one of ours and missing.
 function getOrCreateTab_(name) {
   const ss = ss_();
   let sh = ss.getSheetByName(name);
@@ -373,7 +349,7 @@ function getOrCreateTab_(name) {
   return sh;
 }
 
-/** Read a StockIQ tab as array-of-objects keyed by header. */
+// Read a StockIQ tab as array-of-objects keyed by header.
 function readTabObjects_(name) {
   const sh = ss_().getSheetByName(name);
   if (!sh) return [];
@@ -392,7 +368,7 @@ function readTabObjects_(name) {
   return out;
 }
 
-/** Build a row array in the canonical header order from an object. */
+// Build a row array in the canonical header order from an object.
 function objToRow_(name, obj) {
   const headers = HEADERS[name];
   return headers.map(function (h) {
@@ -401,7 +377,7 @@ function objToRow_(name, obj) {
   });
 }
 
-/** Upsert by a key column. Replaces the row in place if key exists, else appends. */
+// Upsert by a key column. Replaces the row in place if key exists, else appends.
 function upsertByKey_(name, keyCol, obj) {
   const sh = getOrCreateTab_(name);
   const headers = HEADERS[name];
@@ -420,7 +396,7 @@ function upsertByKey_(name, keyCol, obj) {
   return { action: 'inserted', row: sh.getLastRow() };
 }
 
-/** Replace all data rows of a tab in one batch (header preserved). */
+// Replace all data rows of a tab in one batch (header preserved).
 function replaceAllRows_(name, objects) {
   const sh = getOrCreateTab_(name);
   const headers = HEADERS[name];
@@ -438,11 +414,9 @@ function appendRow_(name, obj) {
   return sh.getLastRow();
 }
 
-/* ----------------------------------------------------------------------------
- *  CONFIG  (every threshold flows through here)
- * ------------------------------------------------------------------------- */
+// ── CONFIG  (every threshold flows through here) ─────────────────────────────
 
-/** Returns config as a typed object. Booleans/numbers coerced. */
+// Returns config as a typed object. Booleans/numbers coerced.
 function getConfig() {
   const rows = readTabObjects_(TAB_CONFIG);
   const cfg = {};
@@ -473,7 +447,7 @@ function getConfigValue_(key) {
   return cfg[key];
 }
 
-/** Update one or more config keys. data = { key: value, ... } */
+// Update one or more config keys. data = { key: value, ... }
 function updateConfig(data) {
   if (!data || typeof data !== 'object') throw new Error('updateConfig: data object required');
   const updated = [];
@@ -485,14 +459,10 @@ function updateConfig(data) {
   return { updated: updated, config: getConfig() };
 }
 
-/* ----------------------------------------------------------------------------
- *  SETUP
- * ------------------------------------------------------------------------- */
+// ── SETUP ────────────────────────────────────────────────────────────────────
 
-/**
- * Master setup. Run ONCE from the editor (or via ?action=setupStockIQ).
- * Creates the 5 StockIQ tabs, seeds config, installs triggers. Idempotent.
- */
+// Master setup. Run ONCE from the editor (or via ?action=setupStockIQ).
+// Creates the 5 StockIQ tabs, seeds config, installs triggers. Idempotent.
 function setupStockIQ() {
   log_('setupStockIQ: start');
   const summary = { tabsCreated: [], tabsExisting: [], configSeeded: 0, triggers: null };
@@ -531,13 +501,11 @@ function setupStockIQ() {
   return summary;
 }
 
-/**
- * Install time-driven triggers without creating duplicates:
- *   - Weekly  Sun 08:00 IST -> runFundamentalScreener
- *   - Daily   wk  08:30 IST -> runDailyUpdate
- *   - Daily   wk  21:00 IST -> runEndOfDayAlerts
- * Apps Script triggers fire in the project's timezone; ensure it is IST.
- */
+// Install time-driven triggers without creating duplicates:
+//   - Weekly  Sun 08:00 IST -> runFundamentalScreener
+//   - Daily   wk  08:30 IST -> runDailyUpdate
+//   - Daily   wk  21:00 IST -> runEndOfDayAlerts
+// Apps Script triggers fire in the project's timezone; ensure it is IST.
 function setupTimeTriggers() {
   const wanted = {
     runFundamentalScreener: false,
@@ -569,15 +537,13 @@ function setupTimeTriggers() {
   return { created: created, note: 'Daily triggers fire every day; weekday-only logic is enforced inside the functions via isTradingDay_().' };
 }
 
-/** True Mon–Fri. Use to no-op daily jobs on weekends. */
+// True Mon–Fri. Use to no-op daily jobs on weekends.
 function isTradingDay_(d) {
   const day = (d || new Date()).getDay(); // 0=Sun..6=Sat
   return day >= 1 && day <= 5;
 }
 
-/* ----------------------------------------------------------------------------
- *  CACHE  (PropertiesService with embedded expiry — values stay < 9KB)
- * ------------------------------------------------------------------------- */
+// ── CACHE  (PropertiesService with embedded expiry — values stay < 9KB) ──────
 
 function cacheGet_(key, maxAgeSec) {
   try {
@@ -602,7 +568,7 @@ function cachePut_(key, payload) {
   }
 }
 
-/** Last-resort stale read (ignores expiry) for graceful degradation. */
+// Last-resort stale read (ignores expiry) for graceful degradation.
 function cacheGetStale_(key) {
   try {
     const raw = PropertiesService.getScriptProperties().getProperty(key);
@@ -614,9 +580,7 @@ function cacheGetStale_(key) {
   } catch (e) { return null; }
 }
 
-/* ----------------------------------------------------------------------------
- *  HTTP
- * ------------------------------------------------------------------------- */
+// ── HTTP ─────────────────────────────────────────────────────────────────────
 
 const BROWSER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -639,15 +603,13 @@ function httpGet_(url, headers) {
   }
 }
 
-/* ----------------------------------------------------------------------------
- *  HTML PARSING HELPERS  (tolerant; return null when a value can't be found)
- * ------------------------------------------------------------------------- */
+// ── HTML PARSING HELPERS  (tolerant; return null when a value can't be found) ───
 
 function stripTags_(s) {
   return String(s).replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').trim();
 }
 
-/** Slice out a <section id="..."> ... </section> block (best-effort). */
+// Slice out a <section id="..."> ... </section> block (best-effort).
 function extractSection_(html, sectionId) {
   const start = html.indexOf('id="' + sectionId + '"');
   if (start < 0) return '';
@@ -657,10 +619,8 @@ function extractSection_(html, sectionId) {
   return html.substring(openTag, Math.min(html.length, openTag + 80000));
 }
 
-/**
- * From a screener data-table section, return the numeric row matching label.
- * Looks for <tr>...<td class="text">LABEL...</td><td>n</td>...</tr>.
- */
+// From a screener data-table section, return the numeric row matching label.
+// Looks for <tr>...<td class="text">LABEL...</td><td>n</td>...</tr>.
 function extractTableRow_(sectionHtml, labelRegex) {
   if (!sectionHtml) return null;
   const rows = sectionHtml.match(/<tr[\s\S]*?<\/tr>/g);
@@ -678,7 +638,7 @@ function extractTableRow_(sectionHtml, labelRegex) {
   return null;
 }
 
-/** Read a value from the #top-ratios list (e.g. "Stock P/E", "ROCE"). */
+// Read a value from the #top-ratios list (e.g. "Stock P/E", "ROCE").
 function extractTopRatio_(html, nameRegex) {
   const ul = extractSection_(html, 'top-ratios');
   const scope = ul || html;
@@ -695,7 +655,7 @@ function extractTopRatio_(html, nameRegex) {
   return null;
 }
 
-/** Promoter holding latest % from the shareholding quarterly table. */
+// Promoter holding latest % from the shareholding quarterly table.
 function extractPromoterHolding_(html) {
   const sec = extractSection_(html, 'shareholding');
   const row = extractTableRow_(sec, /^Promoters?\b/i);
@@ -705,7 +665,7 @@ function extractPromoterHolding_(html) {
   return null;
 }
 
-/** Promoter pledge % if disclosed ("Pledged"/"Promoter pledge"). */
+// Promoter pledge % if disclosed ("Pledged"/"Promoter pledge").
 function extractPromoterPledge_(html) {
   const sec = extractSection_(html, 'shareholding');
   const row = extractTableRow_(sec, /pledg/i);
@@ -715,15 +675,11 @@ function extractPromoterPledge_(html) {
   return null;
 }
 
-/* ----------------------------------------------------------------------------
- *  DATA FETCHING — SCREENER.IN (fundamentals)
- * ------------------------------------------------------------------------- */
+// ── DATA FETCHING — SCREENER.IN (fundamentals) ───────────────────────────────
 
-/**
- * Fetch + parse screener.in for a symbol. Tries the consolidated page first,
- * then the standalone page. Returns a structured object or null on failure.
- * Caches the PARSED object (small) for 24h. Sleeps 2s after a live fetch.
- */
+// Fetch + parse screener.in for a symbol. Tries the consolidated page first,
+// then the standalone page. Returns a structured object or null on failure.
+// Caches the PARSED object (small) for 24h. Sleeps 2s after a live fetch.
 function fetchFromScreener(symbol) {
   const cacheKey = 'scr_' + symbol;
   const cached = cacheGet_(cacheKey, SCREENER_CACHE_SEC);
@@ -789,7 +745,7 @@ function fetchFromScreener(symbol) {
   }
 }
 
-/** Debt to equity: top-ratio if present, else last value of a ratios row. */
+// Debt to equity: top-ratio if present, else last value of a ratios row.
 function extractDebtToEquity_(html, ratioSection) {
   const top = extractTopRatio_(html, /Debt to equity/i);
   if (top !== null) return top;
@@ -800,14 +756,10 @@ function extractDebtToEquity_(html, ratioSection) {
   return null;
 }
 
-/* ----------------------------------------------------------------------------
- *  DATA FETCHING — PRICE + 200 DMA  (via GOOGLEFINANCE; see GF layer below)
- * ------------------------------------------------------------------------- */
+// ── DATA FETCHING — PRICE + 200 DMA  (via GOOGLEFINANCE; see GF layer below) ───
 
-/**
- * Current quote via GOOGLEFINANCE (NSE was unreachable from Apps Script).
- * Returns price + 52wk range + PE/EPS. Cached 1h; stale cache on failure.
- */
+// Current quote via GOOGLEFINANCE (NSE was unreachable from Apps Script).
+// Returns price + 52wk range + PE/EPS. Cached 1h; stale cache on failure.
 function fetchNSEPrice(symbol) {
   const cacheKey = 'px_' + symbol;
   const cached = cacheGet_(cacheKey, PRICE_CACHE_SEC);
@@ -836,11 +788,9 @@ function fetchNSEPrice(symbol) {
   return out;
 }
 
-/**
- * Market health: Nifty 50 level vs its true 200-day moving average, both from
- * GOOGLEFINANCE historical closes (real 200-DMA available immediately, no
- * multi-month warm-up). Cached 1h; stale cache on failure.
- */
+// Market health: Nifty 50 level vs its true 200-day moving average, both from
+// GOOGLEFINANCE historical closes (real 200-DMA available immediately, no
+// multi-month warm-up). Cached 1h; stale cache on failure.
 function fetchNifty200DMA() {
   const cacheKey = 'nifty_health';
   const cached = cacheGet_(cacheKey, PRICE_CACHE_SEC);
@@ -864,17 +814,13 @@ function fetchNifty200DMA() {
   return out;
 }
 
-/* ----------------------------------------------------------------------------
- *  DATA FETCHING — HISTORICAL PE
- * ------------------------------------------------------------------------- */
+// ── DATA FETCHING — HISTORICAL PE ────────────────────────────────────────────
 
-/**
- * Current PE from GOOGLEFINANCE plus a self-built rolling-average PE (since
- * GOOGLEFINANCE has no historical PE). avg5yr/avg10yr stay null until ~20 daily
- * samples accumulate; valuation then upgrades from 52w-drawdown to PE-vs-avg.
- * Not cached here (so the daily series records every run); the per-run cost is
- * one GF round-trip.
- */
+// Current PE from GOOGLEFINANCE plus a self-built rolling-average PE (since
+// GOOGLEFINANCE has no historical PE). avg5yr/avg10yr stay null until ~20 daily
+// samples accumulate; valuation then upgrades from 52w-drawdown to PE-vs-avg.
+// Not cached here (so the daily series records every run); the per-run cost is
+// one GF round-trip.
 function fetchHistoricalPE(symbol) {
   const q = gfQuote_(symbol);
   const currentPE = q ? q.pe : null;
@@ -892,14 +838,10 @@ function fetchHistoricalPE(symbol) {
   };
 }
 
-/* ----------------------------------------------------------------------------
- *  CALCULATION LAYER
- * ------------------------------------------------------------------------- */
+// ── CALCULATION LAYER ────────────────────────────────────────────────────────
 
-/**
- * CAGR % from an array ordered oldest..newest.
- * Returns null if <2 points or base year <= 0 (negative base is meaningless).
- */
+// CAGR % from an array ordered oldest..newest.
+// Returns null if <2 points or base year <= 0 (negative base is meaningless).
 function calculateCAGR(valuesArray) {
   const xs = (valuesArray || []).filter(function (x) { return x !== null && isFinite(x); });
   if (xs.length < 2) return null;
@@ -912,7 +854,7 @@ function calculateCAGR(valuesArray) {
   return isFinite(cagr) ? round2_(cagr) : null;
 }
 
-/** CAGR over the last `n` year-on-year points (e.g. 3yr) from oldest..newest. */
+// CAGR over the last `n` year-on-year points (e.g. 3yr) from oldest..newest.
 function calculateTrailingCAGR_(valuesArray, n) {
   const xs = (valuesArray || []).filter(function (x) { return x !== null && isFinite(x); });
   if (xs.length < 2) return null;
@@ -920,10 +862,8 @@ function calculateTrailingCAGR_(valuesArray, n) {
   return calculateCAGR(slice);
 }
 
-/**
- * Cash-flow quality = sum(operating cash flow) / sum(net profit) over the
- * overlapping window. >1 means profits are backed by real cash. Null if N/A.
- */
+// Cash-flow quality = sum(operating cash flow) / sum(net profit) over the
+// overlapping window. >1 means profits are backed by real cash. Null if N/A.
 function calculateCFQuality_(opCash, netProfit) {
   const a = (opCash || []).filter(function (x) { return x !== null && isFinite(x); });
   const b = (netProfit || []).filter(function (x) { return x !== null && isFinite(x); });
@@ -937,24 +877,22 @@ function calculateCFQuality_(opCash, netProfit) {
   return round2_(sumCF / sumNP);
 }
 
-/** Average of the last up-to-5 ROE values. Null if none. */
+// Average of the last up-to-5 ROE values. Null if none.
 function avgROE_(roeArray) {
   const xs = (roeArray || []).filter(function (x) { return x !== null && isFinite(x); });
   if (!xs.length) return null;
   return round2_(mean_(xs.slice(Math.max(0, xs.length - 5))));
 }
 
-/** Count how many of the last 5 ROE readings clear a threshold. */
+// Count how many of the last 5 ROE readings clear a threshold.
 function roeYearsAbove_(roeArray, threshold) {
   const xs = (roeArray || []).filter(function (x) { return x !== null && isFinite(x); });
   const last5 = xs.slice(Math.max(0, xs.length - 5));
   return last5.filter(function (x) { return x >= threshold; }).length;
 }
 
-/**
- * Confidence score 0-100 (weights per spec). Each component degrades to 0
- * when its input is missing rather than throwing.
- */
+// Confidence score 0-100 (weights per spec). Each component degrades to 0
+// when its input is missing rather than throwing.
 function calculateConfidenceScore(f) {
   let score = 0;
 
@@ -989,10 +927,8 @@ function calculateConfidenceScore(f) {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-/**
- * Valuation status from current vs 5yr-avg PE using config discount bands.
- * Returns { status, discountPct } where discountPct is negative when cheap.
- */
+// Valuation status from current vs 5yr-avg PE using config discount bands.
+// Returns { status, discountPct } where discountPct is negative when cheap.
 function calculateValuationStatus(currentPE, avg5yrPE, cfg) {
   cfg = cfg || getConfig();
   if (currentPE === null || avg5yrPE === null || avg5yrPE <= 0 || currentPE <= 0) {
@@ -1009,17 +945,15 @@ function calculateValuationStatus(currentPE, avg5yrPE, cfg) {
   return { status: status, discountPct: discountPct, ratio: round2_(ratio) };
 }
 
-/**
- * Price targets + stop loss + risk:reward from config percentages.
- *   riskReward    = upside-to-T1 / downside-to-SL   (spec definition; displayed)
- *   riskRewardT2  = upside-to-T2 / downside-to-SL   (used as the qualifying gate)
- * NOTE: because targets are fixed config %, both ratios are identical for every
- * stock — they are effectively a global asymmetry sanity gate, not a per-stock
- * discriminator. The T2 ratio is what the opportunity monitor screens on so the
- * default config (T1 20% / T2 35% / SL 12% / min_rr 2.5) is internally
- * consistent (35/12 = 2.92 >= 2.5); the per-stock ranking is driven by the
- * composite score (PE discount, confidence, percentile).
- */
+// Price targets + stop loss + risk:reward from config percentages.
+//   riskReward    = upside-to-T1 / downside-to-SL   (spec definition; displayed)
+//   riskRewardT2  = upside-to-T2 / downside-to-SL   (used as the qualifying gate)
+// NOTE: because targets are fixed config %, both ratios are identical for every
+// stock — they are effectively a global asymmetry sanity gate, not a per-stock
+// discriminator. The T2 ratio is what the opportunity monitor screens on so the
+// default config (T1 20% / T2 35% / SL 12% / min_rr 2.5) is internally
+// consistent (35/12 = 2.92 >= 2.5); the per-stock ranking is driven by the
+// composite score (PE discount, confidence, percentile).
 function calculateTargets(currentPrice, cfg) {
   cfg = cfg || getConfig();
   if (currentPrice === null || !isFinite(currentPrice) || currentPrice <= 0) {
@@ -1044,11 +978,9 @@ function calculateTargets(currentPrice, cfg) {
   };
 }
 
-/**
- * Should we rotate capital out of an existing position into a richer one?
- * Compares the new opportunity's upside to the weakest active position's
- * remaining upside-to-target1, scaled by rotation_trigger_multiplier.
- */
+// Should we rotate capital out of an existing position into a richer one?
+// Compares the new opportunity's upside to the weakest active position's
+// remaining upside-to-target1, scaled by rotation_trigger_multiplier.
 function checkRotationOpportunity(newOpportunityUpsidePct, cfg) {
   cfg = cfg || getConfig();
   const positions = readTabObjects_(TAB_PORTFOLIO).filter(function (p) {
@@ -1089,14 +1021,10 @@ function checkRotationOpportunity(newOpportunityUpsidePct, cfg) {
   };
 }
 
-/* ----------------------------------------------------------------------------
- *  CORE ENGINE
- * ------------------------------------------------------------------------- */
+// ── CORE ENGINE ──────────────────────────────────────────────────────────────
 
-/**
- * Build the fundamentals object for ONE symbol (fetch -> derive -> score).
- * Pure-ish: returns the row object; does not write to the sheet.
- */
+// Build the fundamentals object for ONE symbol (fetch -> derive -> score).
+// Pure-ish: returns the row object; does not write to the sheet.
 function screenOneStock_(meta, cfg) {
   // Data-source switch. Default 'GF' uses GOOGLEFINANCE (scraping is blocked
   // from Apps Script). 'API' would route to an external fundamentals provider.
@@ -1170,12 +1098,10 @@ function screenOneStock_(meta, cfg) {
   return base;
 }
 
-/**
- * Weekly master screen across the whole universe (or a provided subset).
- * Writes one idempotent row per symbol to SCREENER_FUNDAMENTALS.
- * Designed to run overnight (10-15 min for 100 names with 2s sleeps).
- * @param {string[]=} symbols  optional subset for testing (e.g. ['TCS'])
- */
+// Weekly master screen across the whole universe (or a provided subset).
+// Writes one idempotent row per symbol to SCREENER_FUNDAMENTALS.
+// Designed to run overnight (10-15 min for 100 names with 2s sleeps).
+// @param {string[]=} symbols  optional subset for testing (e.g. ['TCS'])
 function runFundamentalScreener(symbols) {
   const cfg = getConfig();
   const universe = (symbols && symbols.length)
@@ -1211,10 +1137,8 @@ function runFundamentalScreener(symbols) {
   return counts;
 }
 
-/**
- * Daily: turn PASS fundamentals into at most `max_opportunities` ranked,
- * valuation-screened, risk:reward-qualified opportunities.
- */
+// Daily: turn PASS fundamentals into at most `max_opportunities` ranked,
+// valuation-screened, risk:reward-qualified opportunities.
 function runOpportunityMonitor() {
   const cfg = getConfig();
   const health = fetchNifty200DMA();
@@ -1364,10 +1288,8 @@ function buildRiskReason_(f, niftyOK, health) {
   return r.join('; ') + '.';
 }
 
-/**
- * Daily 9PM: scan active positions and raise target/stop/thesis alerts.
- * Idempotent on hit flags (won't re-fire TARGET_1 once recorded).
- */
+// Daily 9PM: scan active positions and raise target/stop/thesis alerts.
+// Idempotent on hit flags (won't re-fire TARGET_1 once recorded).
 function runEndOfDayAlerts() {
   if (!isTradingDay_(new Date())) { log_('runEndOfDayAlerts: weekend, skipping'); return { skipped: 'weekend' }; }
   const cfg = getConfig();
@@ -1426,7 +1348,7 @@ function runEndOfDayAlerts() {
   return { alerts: alerts, positions: positions.length, timestamp: nowISO_() };
 }
 
-/** Orchestrate the daily run (weekday-gated). */
+// Orchestrate the daily run (weekday-gated).
 function runDailyUpdate() {
   if (!isTradingDay_(new Date())) { log_('runDailyUpdate: weekend, skipping'); return { skipped: 'weekend' }; }
   log_('runDailyUpdate: start');
@@ -1444,9 +1366,7 @@ function runDailyUpdate() {
   return summary;
 }
 
-/* ----------------------------------------------------------------------------
- *  ALERT + small helpers
- * ------------------------------------------------------------------------- */
+// ── ALERT + small helpers ────────────────────────────────────────────────────
 
 function writeAlert_(a) {
   const row = {
@@ -1482,9 +1402,7 @@ function currentPEForSymbol_(symbol) {
   return pe ? pe.currentPE : null;
 }
 
-/* ----------------------------------------------------------------------------
- *  PORTFOLIO
- * ------------------------------------------------------------------------- */
+// ── PORTFOLIO ────────────────────────────────────────────────────────────────
 
 function getPortfolioSummary() {
   const cfg = getConfig();
@@ -1521,15 +1439,13 @@ function getPortfolioSummary() {
   };
 }
 
-/**
- * Add a position. Hard rules:
- *   - capital cap (phase_capital_limit) is a HARD block.
- *   - symbol must be PASS in fundamentals (warning, not block).
- *   - current opportunity status should be BUY/STRONG_BUY (warning).
- * Writes to SCREENER_PORTFOLIO always; to VaultZero tabs only when
- * paper_trade_mode = FALSE.
- * data = { symbol, entry_price, quantity, notes? }
- */
+// Add a position. Hard rules:
+//   - capital cap (phase_capital_limit) is a HARD block.
+//   - symbol must be PASS in fundamentals (warning, not block).
+//   - current opportunity status should be BUY/STRONG_BUY (warning).
+// Writes to SCREENER_PORTFOLIO always; to VaultZero tabs only when
+// paper_trade_mode = FALSE.
+// data = { symbol, entry_price, quantity, notes? }
 function addPosition(data) {
   if (!data || !data.symbol) throw new Error('addPosition: symbol required');
   const cfg = getConfig();
@@ -1584,7 +1500,7 @@ function addPosition(data) {
            capitalRemaining: round2_(cfg.phase_capital_limit - (summary.capitalDeployed + invested)) };
 }
 
-/** Refresh live price/value/pnl for every active position (batch write). */
+// Refresh live price/value/pnl for every active position (batch write).
 function updatePortfolioPrices() {
   const sh = getOrCreateTab_(TAB_PORTFOLIO);
   const positions = readTabObjects_(TAB_PORTFOLIO);
@@ -1614,11 +1530,9 @@ function updatePortfolioPrices() {
   return { updated: updated, timestamp: nowISO_() };
 }
 
-/**
- * Book profit / exit. percentage = 50 (half) or 100 (full exit).
- * Reduces quantity (or closes), logs a PROFIT_BOOKED alert, and mirrors a SELL
- * to VaultZero only when paper_trade_mode = FALSE.
- */
+// Book profit / exit. percentage = 50 (half) or 100 (full exit).
+// Reduces quantity (or closes), logs a PROFIT_BOOKED alert, and mirrors a SELL
+// to VaultZero only when paper_trade_mode = FALSE.
 function bookProfit(positionId, percentage) {
   const cfg = getConfig();
   const pct = toNum_(percentage);
@@ -1686,15 +1600,11 @@ function writeRowFields_(sheet, rowNum, fields) {
   });
 }
 
-/* ----------------------------------------------------------------------------
- *  VAULTZERO MIRROR (real money only) — header-mapped, never alters structure
- * ------------------------------------------------------------------------- */
+// ── VAULTZERO MIRROR (real money only) — header-mapped, never alters structure ───
 
-/**
- * Best-effort append into the existing VaultZero asset & transaction tabs by
- * matching their header names. Unknown columns are left blank. Returns what
- * was written. Only ever called when paper_trade_mode = FALSE.
- */
+// Best-effort append into the existing VaultZero asset & transaction tabs by
+// matching their header names. Unknown columns are left blank. Returns what
+// was written. Only ever called when paper_trade_mode = FALSE.
 function mirrorToVaultZero_(side, symbol, companyName, qty, price, amount) {
   const out = { written: false };
   try {
@@ -1732,7 +1642,7 @@ function mirrorToVaultZero_(side, symbol, companyName, qty, price, amount) {
   return out;
 }
 
-/** Next integer id for a VaultZero tab = max(numeric col A) + 1 (1 if empty). */
+// Next integer id for a VaultZero tab = max(numeric col A) + 1 (1 if empty).
 function vzNextId_(sheet) {
   const last = sheet.getLastRow();
   if (last < 2) return 1;
@@ -1745,7 +1655,7 @@ function vzNextId_(sheet) {
   return max + 1;
 }
 
-/** Find an asset row by ticker (case-insensitive). Returns {id, row} or null. */
+// Find an asset row by ticker (case-insensitive). Returns {id, row} or null.
 function vzFindAssetByTicker_(ticker) {
   const sh = ss_().getSheetByName(VZ_ASSETS_TAB);
   if (!sh) return null;
@@ -1764,11 +1674,9 @@ function vzFindAssetByTicker_(ticker) {
   return null;
 }
 
-/**
- * Resolve an asset id by ticker; insert a new asset (next id, configured
- * subcategory/strategy, is_active TRUE) when it doesn't exist yet.
- * Returns { id, created }.
- */
+// Resolve an asset id by ticker; insert a new asset (next id, configured
+// subcategory/strategy, is_active TRUE) when it doesn't exist yet.
+// Returns { id, created }.
 function vzResolveAsset_(symbol, companyName, price, cfg) {
   const existing = vzFindAssetByTicker_(symbol);
   if (existing) return { id: existing.id, created: false };
@@ -1790,11 +1698,9 @@ function vzResolveAsset_(symbol, companyName, price, cfg) {
   return { id: id, created: true };
 }
 
-/**
- * Append a row to an existing VaultZero tab by matching its header names
- * (lower-cased). Unknown columns are left blank. Robust to column reordering;
- * never alters the tab's structure.
- */
+// Append a row to an existing VaultZero tab by matching its header names
+// (lower-cased). Unknown columns are left blank. Robust to column reordering;
+// never alters the tab's structure.
 function vzAppendByHeaders_(sheet, valuesByHeader) {
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
     .map(function (h) { return String(h).trim().toLowerCase(); });
@@ -1805,9 +1711,7 @@ function vzAppendByHeaders_(sheet, valuesByHeader) {
   return { tab: sheet.getName(), row: sheet.getLastRow() };
 }
 
-/* ----------------------------------------------------------------------------
- *  READ ENDPOINTS (consumed by the frontend)
- * ------------------------------------------------------------------------- */
+// ── READ ENDPOINTS (consumed by the frontend) ────────────────────────────────
 
 function getScreenerData() {
   const rows = readTabObjects_(TAB_FUNDAMENTALS).map(function (r) { delete r.__row; return r; });
@@ -1818,17 +1722,15 @@ function getScreenerData() {
   return { rows: rows, counts: counts, lastUpdated: last, total: rows.length };
 }
 
-/**
- * Opportunities enriched at read time with the manual Claude deep analysis:
- * each row gets a `deep` object, a combined `final_score`, an `analyzed` flag
- * and a `fundamentals_age_days`. Then:
- *   - AVOID verdicts are dropped entirely (hard block);
- *   - WEAK verdicts get a value-trap guard: display status forced to WATCH and
- *     score heavily cut (so a cheap-but-weak name can't masquerade as a BUY);
- *   - the list is ranked by final_score and the top `max_opportunities` (5) are
- *     flagged `shortlisted` — the rest (up to candidate_pool_size, 10) are bench;
- *   - `noConviction` is set if every analyzed name is WEAK (→ "hold cash").
- */
+// Opportunities enriched at read time with the manual Claude deep analysis:
+// each row gets a `deep` object, a combined `final_score`, an `analyzed` flag
+// and a `fundamentals_age_days`. Then:
+//   - AVOID verdicts are dropped entirely (hard block);
+//   - WEAK verdicts get a value-trap guard: display status forced to WATCH and
+//     score heavily cut (so a cheap-but-weak name can't masquerade as a BUY);
+//   - the list is ranked by final_score and the top `max_opportunities` (5) are
+//     flagged `shortlisted` — the rest (up to candidate_pool_size, 10) are bench;
+//   - `noConviction` is set if every analyzed name is WEAK (→ "hold cash").
 function getOpportunityData() {
   const cfg = getConfig();
   const rows = readTabObjects_(TAB_OPPORTUNITIES).map(function (r) { delete r.__row; return r; });
@@ -1907,7 +1809,7 @@ function getPortfolioData() {
   return { positions: rows, summary: getPortfolioSummary() };
 }
 
-/** Mark an alert actioned. data = { created_at } (unique-ish) or {symbol, alert_type}. */
+// Mark an alert actioned. data = { created_at } (unique-ish) or {symbol, alert_type}.
 function actionAlert(data) {
   const sh = getOrCreateTab_(TAB_ALERTS);
   const rows = readTabObjects_(TAB_ALERTS);
@@ -1927,17 +1829,13 @@ function setAlertActioned_(sheet, rowNum) {
   sheet.getRange(rowNum, idx + 1).setValue(true);
 }
 
-/* ----------------------------------------------------------------------------
- *  DEEP FUNDAMENTAL ANALYSIS (human-in-the-loop via Claude paste)
- *  These values are LLM ESTIMATES, not verified data. Stored separately and
- *  always labelled as such in the UI.
- * ------------------------------------------------------------------------- */
+// ── DEEP FUNDAMENTAL ANALYSIS (human-in-the-loop via Claude paste) ───────────
+//  These values are LLM ESTIMATES, not verified data. Stored separately and
+//  always labelled as such in the UI.
 
-/**
- * Save a pasted Claude analysis. `data` = { analysis: { SYM: {..fields..}, ... },
- * raw?: "<original text>" }. Upserts one row per symbol into SCREENER_DEEP_ANALYSIS.
- * Arrays (red_flags/green_flags) are stored pipe-joined. Returns counts.
- */
+// Save a pasted Claude analysis. `data` = { analysis: { SYM: {..fields..}, ... },
+// raw?: "<original text>" }. Upserts one row per symbol into SCREENER_DEEP_ANALYSIS.
+// Arrays (red_flags/green_flags) are stored pipe-joined. Returns counts.
 function saveDeepAnalysis(data) {
   if (!data) throw new Error('saveDeepAnalysis: data required');
   const analysis = data.analysis || data;     // tolerate the bare map
@@ -1988,7 +1886,7 @@ function flagsToString_(v) {
   return String(v);
 }
 
-/** All deep-analysis rows + a bySymbol map. */
+// All deep-analysis rows + a bySymbol map.
 function getDeepAnalysis() {
   const rows = readTabObjects_(TAB_DEEP).map(function (r) { delete r.__row; return r; });
   const bySymbol = {};
@@ -2000,9 +1898,7 @@ function getDeepAnalysis() {
   return { rows: rows, bySymbol: bySymbol, count: rows.length, lastUpdated: last };
 }
 
-/* ----------------------------------------------------------------------------
- *  API HANDLER
- * ------------------------------------------------------------------------- */
+// ── API HANDLER ──────────────────────────────────────────────────────────────
 
 function doGet(e) {
   const action = e && e.parameter ? e.parameter.action : null;
@@ -2010,12 +1906,10 @@ function doGet(e) {
   return handleAction_(action, data);
 }
 
-/**
- * POST entry point — used for large payloads (e.g. a pasted Claude analysis)
- * that would overflow a GET query string. Body is the JSON `data`; the action
- * stays in the query string. text/plain content-type keeps it a CORS-simple
- * request (no preflight).
- */
+// POST entry point — used for large payloads (e.g. a pasted Claude analysis)
+// that would overflow a GET query string. Body is the JSON `data`; the action
+// stays in the query string. text/plain content-type keeps it a CORS-simple
+// request (no preflight).
 function doPost(e) {
   const action = e && e.parameter ? e.parameter.action : null;
   let data = null;
@@ -2104,9 +1998,7 @@ function jsonOut_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/* ----------------------------------------------------------------------------
- *  SELF-TEST (run from editor to validate the data + calc layers on 1 stock)
- * ------------------------------------------------------------------------- */
+// ── SELF-TEST (run from editor to validate the data + calc layers on 1 stock) ───
 
 function selfTest(symbol) {
   symbol = symbol || 'TCS';
@@ -2133,20 +2025,18 @@ function selfTest(symbol) {
   return report;
 }
 
-/** Convenience wrappers to run from the Apps Script editor dropdown. */
+// Convenience wrappers to run from the Apps Script editor dropdown.
 function TEST_setup()        { return setupStockIQ(); }
 function TEST_screenTCS()    { return runFundamentalScreener(['TCS']); }
 function TEST_screen5()      { return runFundamentalScreener(['TCS','INFY','HDFCBANK','ITC','RELIANCE']); }
 function TEST_opportunities(){ return runOpportunityMonitor(); }
 function TEST_selfTestTCS()  { return selfTest('TCS'); }
 
-/* ----------------------------------------------------------------------------
- *  GOOGLEFINANCE DATA LAYER
- *  screener.in / NSE are unreachable from Apps Script (Cloudflare blocks the
- *  datacenter IPs -> "Address unavailable"). GOOGLEFINANCE is native to the
- *  Sheet, so we round-trip formulas through a hidden scratch tab and read the
- *  computed values back. This is the price/PE/52wk/200-DMA engine.
- * ------------------------------------------------------------------------- */
+// ── GOOGLEFINANCE DATA LAYER ─────────────────────────────────────────────────
+//  screener.in / NSE are unreachable from Apps Script (Cloudflare blocks the
+//  datacenter IPs -> "Address unavailable"). GOOGLEFINANCE is native to the
+//  Sheet, so we round-trip formulas through a hidden scratch tab and read the
+//  computed values back. This is the price/PE/52wk/200-DMA engine.
 
 function gfPrepScratch_() {
   const ss = ss_();
@@ -2155,11 +2045,9 @@ function gfPrepScratch_() {
   return sh;
 }
 
-/**
- * Live-ish quote via GOOGLEFINANCE. `symbol` may be a bare NSE code (TCS) or a
- * full ticker with a colon (INDEXNSE:NIFTY_50). Returns numeric fields or null
- * per field on #N/A. Serialized with a script lock to protect the scratch cells.
- */
+// Live-ish quote via GOOGLEFINANCE. `symbol` may be a bare NSE code (TCS) or a
+// full ticker with a colon (INDEXNSE:NIFTY_50). Returns numeric fields or null
+// per field on #N/A. Serialized with a script lock to protect the scratch cells.
 function gfQuote_(symbol) {
   const ticker = (String(symbol).indexOf(':') >= 0) ? String(symbol) : ('NSE:' + symbol);
   const attrs = ['price', 'pe', 'eps', 'high52', 'low52', 'changepct'];
@@ -2187,10 +2075,8 @@ function gfQuote_(symbol) {
   }
 }
 
-/**
- * Historical daily closes via GOOGLEFINANCE -> current level + N-day moving avg.
- * `ticker` is a full GOOGLEFINANCE ticker (e.g. INDEXNSE:NIFTY_50 or NSE:TCS).
- */
+// Historical daily closes via GOOGLEFINANCE -> current level + N-day moving avg.
+// `ticker` is a full GOOGLEFINANCE ticker (e.g. INDEXNSE:NIFTY_50 or NSE:TCS).
 function gfHistoricalAvgClose_(ticker, calendarDays, lastN) {
   const lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (e) {}
@@ -2218,11 +2104,9 @@ function gfHistoricalAvgClose_(ticker, calendarDays, lastN) {
   }
 }
 
-/**
- * Rolling PE history per symbol (PropertiesService). GOOGLEFINANCE gives only
- * the *current* PE, so a self-built daily series becomes the "average PE"
- * signal over time. Needs >=20 samples (~1 month) before it returns an average.
- */
+// Rolling PE history per symbol (PropertiesService). GOOGLEFINANCE gives only
+// the *current* PE, so a self-built daily series becomes the "average PE"
+// signal over time. Needs >=20 samples (~1 month) before it returns an average.
 function updatePERollingSeries_(symbol, pe) {
   const key = 'peseries_' + symbol;
   let arr = [];
@@ -2245,11 +2129,9 @@ function updatePERollingSeries_(symbol, pe) {
   return { avg: avg, stdDev: sd, percentile: percentile, samples: vals.length };
 }
 
-/**
- * GF valuation fallback when no PE-average exists yet: distance below the
- * 52-week high (the "X% off peak = accumulate" signal). discountPct is the
- * drawdown (negative = below high).
- */
+// GF valuation fallback when no PE-average exists yet: distance below the
+// 52-week high (the "X% off peak = accumulate" signal). discountPct is the
+// drawdown (negative = below high).
 function calculateValuationStatusGF_(price, high52, cfg) {
   cfg = cfg || getConfig();
   if (price === null || high52 === null || high52 <= 0) {
@@ -2265,12 +2147,10 @@ function calculateValuationStatusGF_(price, high52, cfg) {
   return { status: status, discountPct: dd, ratio: null, basis: '52w_drawdown' };
 }
 
-/**
- * GF-mode fundamental row for one stock. Nifty 100 are pre-vetted large caps,
- * so a profitable, priced name PASSes; the real selection happens at the
- * opportunity stage (valuation + risk:reward + confidence>=60). Confidence here
- * is a GOOGLEFINANCE proxy: profitability + sane PE + drawdown from 52w high.
- */
+// GF-mode fundamental row for one stock. Nifty 100 are pre-vetted large caps,
+// so a profitable, priced name PASSes; the real selection happens at the
+// opportunity stage (valuation + risk:reward + confidence>=60). Confidence here
+// is a GOOGLEFINANCE proxy: profitability + sane PE + drawdown from 52w high.
 function screenOneStockGF_(meta, cfg) {
   const base = {
     symbol: meta.symbol, company_name: meta.name, sector: meta.sector, is_banking: meta.isBanking,
@@ -2298,7 +2178,7 @@ function screenOneStockGF_(meta, cfg) {
   return base;
 }
 
-/** Manual test from the editor: dump GF data + valuation for one symbol. */
+// Manual test from the editor: dump GF data + valuation for one symbol.
 function TEST_gfTCS() {
   const cfg = getConfig();
   const q = gfQuote_('TCS');
@@ -2311,11 +2191,9 @@ function TEST_gfTCS() {
   return report;
 }
 
-/**
- * Set (or clear) the API token that gates sensitive write actions. Run once
- * from the editor, e.g. TEST_setApiToken('pick-a-long-random-string'), then
- * enter the SAME token in the app via the 🔑 button. Pass '' to remove the gate.
- */
+// Set (or clear) the API token that gates sensitive write actions. Run once
+// from the editor, e.g. TEST_setApiToken('pick-a-long-random-string'), then
+// enter the SAME token in the app via the 🔑 button. Pass '' to remove the gate.
 function TEST_setApiToken(token) {
   const props = PropertiesService.getScriptProperties();
   if (token) { props.setProperty('api_token', String(token).trim()); log_('api_token set'); return { set: true }; }

@@ -310,19 +310,29 @@ async function saveDeep() {
     toast('Invalid JSON — check Claude\'s reply and retry', false);
     return;
   }
+  const symbols = Object.keys(parsed).filter(k => parsed[k] && typeof parsed[k] === 'object');
+  if (!symbols.length) { toast('No stock objects found in the JSON', false); return; }
+
   const btn = document.getElementById('saveDeepBtn');
   btn.disabled = true;
+  // One stock per request — keeps each URL short (no doPost / URL-length issues).
+  let saved = 0;
   try {
-    const r = await api('saveDeepAnalysis', { analysis: parsed });
-    toast('Saved fundamentals for ' + r.saved + ' stock(s)');
+    for (const sym of symbols) {
+      btn.textContent = 'Saving ' + (saved + 1) + '/' + symbols.length + '…';
+      await api('saveDeepAnalysis', { analysis: { [sym]: parsed[sym] } });
+      saved++;
+    }
+    toast('Saved fundamentals for ' + saved + ' stock(s)');
     document.getElementById('deepFresh').textContent = 'saved just now';
     box.value = '';
     deepCount();
     loadOpportunities();
   } catch (e) {
-    toast(e.message, false);
+    toast('Saved ' + saved + '/' + symbols.length + ' — ' + e.message, false);
   } finally {
     btn.disabled = false;
+    btn.textContent = '💾 Save Fundamental Data';
   }
 }
 

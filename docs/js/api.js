@@ -1,10 +1,11 @@
 // StockIQ — API layer (Apps Script Web App calls) + write token
 
 // ── Request ─────────────────────────────────────────────────────────────────
-// GET-only: Apps Script returns CORS-safe responses for GET (via the
-// googleusercontent redirect); cross-origin POST from a browser trips CORS.
-// The write token (if set on this device) rides along on every call — harmless
-// for reads, required for gated writes (add/sell/config).
+// GET-only: Apps Script returns CORS-safe responses for GET (the
+// googleusercontent redirect carries Access-Control-Allow-Origin); POST needs a
+// doPost handler and is avoided. Keep payloads small — large ones (the pasted
+// analysis) are split into per-stock calls by the caller so each URL stays short.
+// The write token (if set on this device) rides along on every call.
 async function api(action, dataObj) {
   if (!WEB_APP_URL || WEB_APP_URL.indexOf('PASTE_') === 0) {
     throw new Error('WEB_APP_URL is not set in js/config.js');

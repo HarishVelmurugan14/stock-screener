@@ -152,6 +152,14 @@ async function loadOpportunities() {
     const shortlist = d.opportunities.filter(o => o.shortlisted);
     const bench = d.opportunities.filter(o => !o.shortlisted);
     let html = '';
+
+    // 10-name candidate strip (max 3 per sector) — quick glance over the pool.
+    const chips = d.opportunities.map(o =>
+      '<span class="chip' + (o.shortlisted ? ' short' : '') + '">' + (o.shortlisted ? '★ ' : '') + o.symbol +
+      '<span class="chip-sec">' + (o.sector || '') + '</span></span>').join('');
+    html += '<div class="sub mb-8">' + d.count + ' candidates · max 3 per sector · ★ = shortlist</div>';
+    html += '<div class="chips">' + chips + '</div>';
+
     if (d.noConviction) {
       html += '<div class="err mb-12">⚠️ No high-conviction ideas right now — every analyzed name looks ' +
         'fundamentally weak. Holding cash is a valid move; don\'t force a buy.</div>';

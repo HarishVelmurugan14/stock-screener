@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>StockIQ — Stock Intelligence</title>
+<!-- Installable-to-home-screen (PWA-lite) -->
+<meta name="theme-color" content="#0f1419" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="StockIQ" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f9d55'/%3E%3Ctext x='32' y='45' font-size='32' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EIQ%3C/text%3E%3C/svg%3E" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f9d55'/%3E%3Ctext x='32' y='45' font-size='32' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EIQ%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#0f1419; --panel:#171e26; --panel2:#1d2630; --line:#2a3540;
+    --txt:#e6edf3; --muted:#8b98a5; --faint:#5a6772;
+    --green:#1f9d55; --green-d:#0f6b38; --green-l:#2ecc71;
+    --amber:#d98a1f; --red:#e0413a; --red-d:#a52a25;
+    --blue:#2f81f7; --accent:#3fb950;
+    --radius:12px; --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--txt);
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; padding-bottom:60px;
+  }
+  a { color:var(--blue); text-decoration:none; }
+  .wrap { max-width:1080px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; font-weight:800; letter-spacing:-.3px; }
+  h2 { font-size:15px; font-weight:700; color:var(--txt); display:flex; align-items:center; gap:8px; }
+  .sub { color:var(--muted); font-size:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:16px; box-shadow:var(--shadow); }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .spread { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.3px; }
+  .pill.green { background:rgba(31,157,85,.16); color:var(--green-l); }
+  .pill.red { background:rgba(224,65,58,.16); color:#ff6b63; }
+  .pill.amber { background:rgba(217,138,31,.16); color:#f0a93c; }
+  .pill.blue { background:rgba(47,129,247,.16); color:#6cb0ff; }
+  .pill.grey { background:rgba(139,152,165,.14); color:var(--muted); }
+  .btn { font-family:inherit; font-size:13px; font-weight:600; cursor:pointer; border:1px solid var(--line);
+         background:var(--panel2); color:var(--txt); padding:8px 14px; border-radius:8px; transition:.15s; }
+  .btn:hover { border-color:var(--blue); }
+  .btn.primary { background:var(--green-d); border-color:var(--green); color:#fff; }
+  .btn.primary:hover { background:var(--green); }
+  .btn.danger { background:var(--red-d); border-color:var(--red); color:#fff; }
+  .btn.small { padding:5px 10px; font-size:12px; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .grid { display:grid; gap:12px; }
+  .stat { background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .stat .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .stat .v { font-size:20px; font-weight:700; margin-top:2px; }
+  .v.pos { color:var(--green-l); } .v.neg { color:#ff6b63; }
+  .muted { color:var(--muted); } .faint { color:var(--faint); }
+  /* opportunity card */
+  .opps { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:14px; }
+  .card { border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:var(--panel2); display:flex; flex-direction:column; }
+  .card .head { padding:12px 14px; display:flex; justify-content:space-between; align-items:flex-start; }
+  .card.STRONG_BUY .head { background:linear-gradient(135deg,var(--green-d),#0b4d28); }
+  .card.BUY .head { background:linear-gradient(135deg,#15723f,#0f5c33); }
+  .card.WATCH .head { background:linear-gradient(135deg,#7a5111,#5e3e0d); }
+  .card .sym { font-size:18px; font-weight:800; }
+  .card .price { font-size:22px; font-weight:800; margin-top:2px; }
+  .card .body { padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+  .kv { display:flex; justify-content:space-between; font-size:13px; }
+  .kv .lbl { color:var(--muted); }
+  .targets { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .tbox { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; text-align:center; }
+  .tbox .t { font-size:10px; color:var(--muted); text-transform:uppercase; }
+  .tbox .n { font-size:14px; font-weight:700; margin-top:2px; }
+  .tbox.t1 .n { color:var(--green-l); } .tbox.t2 .n { color:#6cb0ff; } .tbox.sl .n { color:#ff6b63; }
+  .reason { font-size:12px; background:var(--panel); border-left:3px solid var(--green); padding:8px 10px; border-radius:0 6px 6px 0; }
+  .reason.exit { border-left-color:var(--amber); } .reason.risk { border-left-color:var(--red); }
+  .reason b { color:var(--txt); }
+  /* portfolio rows */
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  tr:hover td { background:rgba(255,255,255,.02); }
+  .badge { padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700; }
+  .badge.HOLD { background:rgba(139,152,165,.16); color:var(--muted); }
+  .badge.BOOK_PROFIT { background:rgba(31,157,85,.2); color:var(--green-l); animation:pulse 1.6s infinite; }
+  .badge.REVIEW { background:rgba(217,138,31,.2); color:#f0a93c; }
+  .badge.EXIT_NOW { background:rgba(224,65,58,.22); color:#ff6b63; animation:pulse 1.2s infinite; }
+  .badge.PARTIAL_BOOKED { background:rgba(47,129,247,.18); color:#6cb0ff; }
+  .badge.CLOSED { background:rgba(90,103,114,.18); color:var(--faint); }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.55;} }
+  /* alerts */
+  .alert { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px; margin-bottom:8px; border:1px solid var(--line); }
+  .alert.p1 { background:rgba(224,65,58,.1); border-color:var(--red-d); }
+  .alert.p2,.alert.p3 { background:rgba(31,157,85,.08); border-color:var(--green-d); }
+  .alert.p4,.alert.p5 { background:rgba(217,138,31,.08); border-color:#6e4d12; }
+  .alert .ico { font-size:18px; }
+  .alert .msg { flex:1; } .alert .msg .t { font-weight:700; font-size:12px; }
+  .alert .msg .d { font-size:12px; color:var(--muted); }
+  /* misc */
+  .spinner { width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--blue); border-radius:50%; animation:spin .7s linear infinite; display:inline-block; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .center { text-align:center; padding:30px; color:var(--muted); }
+  .err { background:rgba(224,65,58,.1); border:1px solid var(--red-d); color:#ff8a84; padding:12px; border-radius:10px; font-size:13px; }
+  .collapse-hd { cursor:pointer; user-select:none; }
+  .filters { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+  select,input { font-family:inherit; background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px; }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; max-width:380px; width:100%; }
+  .modal h3 { font-size:16px; margin-bottom:12px; }
+  .field { margin-bottom:12px; } .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .field input { width:100%; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line);
+           padding:10px 16px; border-radius:10px; font-size:13px; box-shadow:var(--shadow); z-index:60; display:none; max-width:90%; }
+  .toast.show { display:block; } .toast.ok { border-color:var(--green); } .toast.bad { border-color:var(--red); }
+  .freshness { font-size:11px; color:var(--faint); }
+  @media (max-width:560px){ .stat .v { font-size:16px; } .opps { grid-template-columns:1fr; } th.hide,td.hide{ display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- header -->
+  <div class="spread" style="margin-bottom:14px;">
+    <div>
+      <h1>StockIQ <span class="pill blue" id="modeBadge" style="vertical-align:middle;">…</span></h1>
+      <div class="sub">Nifty 100 large-cap intelligence · max 5 high-conviction ideas</div>
+    </div>
+    <div class="row">
+      <button class="btn" onclick="setTokenPrompt()" title="Set write token">🔑</button>
+      <button class="btn" id="refreshAll" onclick="loadAll()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- SECTION 1 — Market Health -->
+  <div class="panel" id="healthPanel">
+    <div class="spread">
+      <h2>Market Health</h2>
+      <span class="freshness" id="healthFresh"></span>
+    </div>
+    <div id="healthBody" class="center"><span class="spinner"></span></div>
+  </div>
+
+  <!-- SECTION 2 — Alerts -->
+  <div id="alertsWrap"></div>
+
+  <!-- SECTION 3 — Opportunities -->
+  <div class="panel">
+    <div class="spread">
+      <h2>Opportunities <span class="sub" id="oppCount"></span></h2>
+      <span class="freshness" id="oppFresh"></span>
+    </div>
+    <div id="oppBody" class="center"><span class="spinner"></span></div>
+
+    <!-- Human-in-the-loop fundamental analysis -->
+    <div id="deepPanel" style="margin-top:14px; border-top:1px solid var(--line); padding-top:14px; display:none;">
+      <div class="spread" style="margin-bottom:8px;">
+        <h2 style="font-size:14px;">🔬 Fundamental Analysis <span class="sub">(via Claude · LLM estimates)</span></h2>
+        <button class="btn small" id="copyPromptBtn" onclick="copyDeepPrompt()">📋 Copy Analysis Prompt</button>
+      </div>
+      <div class="sub" style="margin-bottom:8px;">
+        1) Copy prompt → 2) paste into Claude.ai → 3) copy its JSON reply → 4) paste below → Save.
+      </div>
+      <textarea id="deepJson" placeholder="Paste Claude's JSON response here…" oninput="deepCount()"
+        style="width:100%; min-height:90px; resize:vertical; font-family:ui-monospace,monospace; font-size:12px;"></textarea>
+      <div class="spread" style="margin-top:8px;">
+        <span class="sub" id="deepCountLbl">0 chars</span>
+        <span class="freshness" id="deepFresh"></span>
+        <button class="btn primary small" id="saveDeepBtn" onclick="saveDeep()">💾 Save Fundamental Data</button>
+      </div>
+      <div class="sub" style="margin-top:6px; color:var(--faint);">⚠ These figures are AI estimates — verify on screener.in/Tickertape before acting.</div>
+    </div>
+  </div>
+
+  <!-- SECTION 4 — Portfolio -->
+  <div class="panel">
+    <div class="spread">
+      <h2>Portfolio</h2>
+      <span class="freshness" id="pfFresh"></span>
+    </div>
+    <div id="pfSummary" class="grid" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); margin-bottom:12px;"></div>
+    <div id="pfBody" class="center"><span class="spinner"></span></div>
+  </div>
+
+  <!-- SECTION 5 — Screener (collapsed) -->
+  <div class="panel">
+    <div class="spread collapse-hd" onclick="toggleScreener()">
+      <h2><span id="scrCaret">▸</span> Screener Results <span class="sub" id="scrCounts"></span></h2>
+      <span class="freshness" id="scrFresh"></span>
+    </div>
+    <div id="scrPanel" style="display:none;">
+      <div class="filters">
+        <select id="scrSector" onchange="renderScreener()"><option value="">All sectors</option></select>
+        <select id="scrStatus" onchange="renderScreener()">
+          <option value="">All statuses</option><option>PASS</option><option>FAIL</option><option>INSUFFICIENT_DATA</option>
+        </select>
+        <select id="scrSort" onchange="renderScreener()">
+          <option value="confidence_score">Sort: Confidence</option>
+          <option value="revenue_cagr_5yr">Sort: Revenue CAGR</option>
+          <option value="roe_avg_5yr">Sort: ROE</option>
+        </select>
+        <button class="btn small" onclick="runFullScreener()" id="runScrBtn">Run Full Screener (weekly · ~10–15 min)</button>
+      </div>
+      <div id="scrBody" class="center"><span class="spinner"></span></div>
+    </div>
+  </div>
+
+  <div class="freshness center" style="margin-top:8px;">StockIQ · data is informational, not investment advice · verify before acting</div>
+</div>
+
+<!-- Add-to-portfolio modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3 id="mTitle">Add to Portfolio</h3>
+    <div class="field"><label>Symbol</label><input id="mSymbol" readonly /></div>
+    <div class="field"><label>Entry price (₹)</label><input id="mPrice" type="number" step="0.01" /></div>
+    <div class="field"><label>Quantity</label><input id="mQty" type="number" step="1" oninput="mCalc()" /></div>
+    <div class="field"><label>Investment</label><input id="mAmt" readonly /></div>
+    <div id="mWarn" class="sub" style="margin-bottom:10px;"></div>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" id="mConfirm" onclick="confirmAdd()">Add Position</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================================================================== */
+/*  CONFIG                                                               */
+/* ===================================================================== */
+const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyRxkp7pXgTD1R8e1B-Ot7aTVpbfmGzzORu4KTyKKUUUZ6wfPQJQ8R7bs33Jc_WzZ5J/exec";
+
+/* In-memory caches for client-side rendering/filters. */
+let SCREENER_ROWS = [];
+let CONFIG = {};
+
+/* ===================================================================== */
+/*  API LAYER                                                            */
+/* ===================================================================== */
+async function api(action, dataObj) {
+  if (!WEB_APP_URL || WEB_APP_URL.indexOf("PASTE_") === 0) {
+    throw new Error("WEB_APP_URL is not set in index.html");
+  }
+  // GET-only: Apps Script web apps return CORS-safe responses for GET (via the
+  // googleusercontent redirect); cross-origin POST from a browser trips CORS.
+  // Payloads here stay small enough for the query string.
+  // Attach the write token (if set on this device) to every call — harmless for
+  // reads, required for gated writes (add/sell/config).
+  const tok = localStorage.getItem("stockiq_token");
+  const payload = tok ? Object.assign({}, dataObj || {}, { token: tok }) : dataObj;
+  let url = WEB_APP_URL + "?action=" + encodeURIComponent(action);
+  if (payload) url += "&data=" + encodeURIComponent(JSON.stringify(payload));
+  const res = await fetch(url, { method: "GET", redirect: "follow" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Request failed");
+  return json.data;
+}
+
+function fmt(n, dp) {
+  if (n === null || n === undefined || n === "" || isNaN(Number(n))) return "—";
+  return Number(n).toLocaleString("en-IN", { minimumFractionDigits: dp||0, maximumFractionDigits: dp||0 });
+}
+function rupee(n, dp) { return n===null||n===undefined||n===""||isNaN(Number(n)) ? "—" : "₹" + fmt(n, dp===undefined?2:dp); }
+function ago(iso) {
+  if (!iso) return "no data";
+  const d = new Date(iso); if (isNaN(d)) return String(iso);
+  const s = Math.round((Date.now()-d.getTime())/1000);
+  if (s<60) return s+"s ago"; if (s<3600) return Math.round(s/60)+"m ago";
+  if (s<86400) return Math.round(s/3600)+"h ago"; return Math.round(s/86400)+"d ago";
+}
+function toast(msg, ok) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.className = "toast show " + (ok===false?"bad":"ok");
+  setTimeout(()=>{ t.className="toast"; }, 3200);
+}
+function setTokenPrompt() {
+  const cur = localStorage.getItem("stockiq_token") || "";
+  const t = prompt("Write token — must match the one you set via TEST_setApiToken() in Apps Script.\nLeave blank to clear. (Stored only in this browser.)", cur);
+  if (t === null) return;
+  if (t.trim()) { localStorage.setItem("stockiq_token", t.trim()); toast("Token saved on this device"); }
+  else { localStorage.removeItem("stockiq_token"); toast("Token cleared"); }
+}
+function errBox(container, e) {
+  document.getElementById(container).innerHTML =
+    '<div class="err">⚠ ' + (e.message||e) + ' <button class="btn small" style="margin-left:8px;" onclick="loadAll()">Retry</button></div>';
+}
+
+/* ===================================================================== */
+/*  SECTION 1 — MARKET HEALTH                                            */
+/* ===================================================================== */
+async function loadHealth() {
+  try {
+    const [h, s] = await Promise.all([ api("getMarketHealth"), api("getPortfolioSummary") ]);
+    CONFIG.paper = s.paperTradeMode;
+    document.getElementById("modeBadge").textContent = s.paperTradeMode ? "PAPER" : "LIVE ₹";
+    document.getElementById("modeBadge").className = "pill " + (s.paperTradeMode ? "blue" : "red");
+
+    const healthy = h.isAbove200DMA === true;
+    const statusPill = h.isAbove200DMA === null
+      ? '<span class="pill grey">◌ DATA BUILDING</span>'
+      : (healthy ? '<span class="pill green">🟢 HEALTHY</span>' : '<span class="pill red">🔴 CAUTION</span>');
+    const deployedPct = s.phaseCapitalLimit ? Math.min(100, (s.capitalDeployed/s.phaseCapitalLimit)*100) : 0;
+
+    document.getElementById("healthBody").innerHTML =
+      '<div class="row" style="gap:20px; align-items:center;">' +
+        '<div class="stat" style="flex:1; min-width:150px;"><div class="k">Nifty 50</div><div class="v">'+fmt(h.currentLevel,0)+'</div>'+
+          '<div class="sub">200 DMA: '+(h.dma200?fmt(h.dma200,0):'building '+(h.samples||0)+'/200')+'</div></div>' +
+        '<div class="stat" style="flex:1; min-width:120px;"><div class="k">Market</div><div class="v" style="font-size:15px;">'+statusPill+'</div></div>' +
+        '<div class="stat" style="flex:1; min-width:160px;"><div class="k">Phase capital</div><div class="v" style="font-size:16px;">'+rupee(s.capitalDeployed)+' / '+rupee(s.phaseCapitalLimit,0)+'</div>'+
+          '<div style="height:6px;background:var(--line);border-radius:4px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:'+deployedPct+'%;background:'+(deployedPct>90?'var(--red)':'var(--green)')+';"></div></div></div>' +
+      '</div>';
+    document.getElementById("healthFresh").textContent = "updated " + ago(h.fetchedAt) + (h._stale?" · stale":"");
+  } catch(e){ errBox("healthBody", e); }
+}
+
+/* ===================================================================== */
+/*  SECTION 2 — ALERTS                                                   */
+/* ===================================================================== */
+const ALERT_ICON = { STOP_LOSS_HIT:"🚨", TARGET_2_HIT:"🎯", TARGET_1_HIT:"🎯", ROTATION_OPPORTUNITY:"🔄", THESIS_BROKEN:"⚠️", NEW_OPPORTUNITY:"✨", PROFIT_BOOKED:"✅" };
+const ALERT_PRI  = { STOP_LOSS_HIT:1, TARGET_2_HIT:2, TARGET_1_HIT:3, ROTATION_OPPORTUNITY:4, THESIS_BROKEN:5, NEW_OPPORTUNITY:6, PROFIT_BOOKED:7 };
+async function loadAlerts() {
+  try {
+    const a = await api("getAlerts");
+    const wrap = document.getElementById("alertsWrap");
+    if (!a.open.length) { wrap.innerHTML = ""; return; }
+    let html = '<div class="panel"><div class="spread"><h2>⚡ Active Alerts <span class="pill red">'+a.openCount+'</span></h2></div><div style="margin-top:10px;">';
+    a.open.forEach(al => {
+      const pri = ALERT_PRI[al.alert_type] || 6;
+      html += '<div class="alert p'+pri+'">'+
+        '<div class="ico">'+(ALERT_ICON[al.alert_type]||"•")+'</div>'+
+        '<div class="msg"><div class="t">'+al.symbol+' · '+al.alert_type.replace(/_/g," ")+'</div>'+
+          '<div class="d">'+al.message+(al.action_required?' <b style="color:var(--txt)">→ '+al.action_required+'</b>':'')+'</div></div>'+
+        '<button class="btn small" onclick="markDone(\''+(al.created_at||"")+'\',\''+al.symbol+'\',\''+al.alert_type+'\')">Mark done</button>'+
+      '</div>';
+    });
+    wrap.innerHTML = html + '</div></div>';
+  } catch(e){ errBox("alertsWrap", e); }
+}
+async function markDone(created_at, symbol, type) {
+  try { await api("actionAlert", created_at ? {created_at} : {symbol, alert_type:type}); toast("Alert cleared"); loadAlerts(); }
+  catch(e){ toast(e.message,false); }
+}
+
+/* ===================================================================== */
+/*  SECTION 3 — OPPORTUNITIES                                            */
+/* ===================================================================== */
+let OPP_SYMBOLS = [];   // current opportunity symbols, for the analysis prompt
+async function loadOpportunities() {
+  try {
+    const d = await api("getOpportunityData");
+    OPP_SYMBOLS = d.opportunities.map(o => o.symbol);
+    const analyzed = d.analyzedCount || 0;
+    document.getElementById("oppCount").textContent = d.count ? "("+d.count+" of max 5 · 🔬"+analyzed+" analyzed)" : "";
+    document.getElementById("oppFresh").textContent = d.lastUpdated ? "screened "+ago(toISO(d.lastUpdated)) : "";
+    document.getElementById("deepPanel").style.display = d.count ? "block" : "none";
+    if (!d.opportunities.length) {
+      document.getElementById("oppBody").innerHTML =
+        '<div class="center">No opportunities meet the criteria right now.<br><span class="sub">This is intentional — quality over quantity. Capital waits.</span></div>';
+      return;
+    }
+    document.getElementById("oppBody").innerHTML = '<div class="opps">' + d.opportunities.map(oppCard).join("") + '</div>';
+  } catch(e){ errBox("oppBody", e); }
+}
+function oppCard(o) {
+  const disc = o.pe_discount_pct!==""&&o.pe_discount_pct!==null ? Number(o.pe_discount_pct).toFixed(0)+"%" : "—";
+  const usingDD = o.avg_pe_5yr===""||o.avg_pe_5yr===null;   // GF drawdown valuation vs PE-avg
+  const valLine = usingDD
+    ? '<div class="kv"><span class="lbl">Off 52wk high</span><span class="'+(Number(o.pe_discount_pct)<0?'v pos':'')+'">'+disc+'</span></div>'
+    : '<div class="kv"><span class="lbl">Avg PE</span><span>'+fmt(o.avg_pe_5yr,1)+'x <span class="'+(Number(o.pe_discount_pct)<0?'v pos':'')+'">('+disc+')</span></span></div>';
+  const mark = o.analyzed ? '🔬' : '⚠️';
+  return '<div class="card '+o.valuation_status+'">'+
+    '<div class="head"><div><div class="sym">'+mark+' '+o.symbol+'</div><div class="sub" style="color:rgba(255,255,255,.75)">'+(o.sector||"")+'</div><div class="price">'+rupee(o.current_price)+'</div></div>'+
+      '<span class="pill grey" style="background:rgba(255,255,255,.18);color:#fff;">'+o.valuation_status.replace("_"," ")+'</span></div>'+
+    '<div class="body">'+
+      '<div class="kv"><span class="lbl">Current PE</span><span>'+fmt(o.current_pe,1)+'x</span></div>'+
+      valLine +
+      '<div class="kv"><span class="lbl">Valuation conf.</span><span>'+fmt(o.confidence_score,0)+'/100</span></div>'+
+      '<div class="kv"><span class="lbl">Risk : Reward</span><span>1 : '+fmt(o.risk_reward_ratio,1)+'</span></div>'+
+      deepBlock(o) +
+      '<div class="targets">'+
+        '<div class="tbox t1"><div class="t">Target 1</div><div class="n">'+rupee(o.target_1_price,0)+'</div><div class="sub">+'+fmt(o.target_1_upside_pct,0)+'%</div></div>'+
+        '<div class="tbox t2"><div class="t">Target 2</div><div class="n">'+rupee(o.target_2_price,0)+'</div><div class="sub">+'+fmt(o.target_2_upside_pct,0)+'%</div></div>'+
+        '<div class="tbox sl"><div class="t">Stop</div><div class="n">'+rupee(o.stop_loss_price,0)+'</div><div class="sub">-'+fmt(o.stop_loss_pct,0)+'%</div></div>'+
+      '</div>'+
+      '<div class="reason"><b>WHY:</b> '+(o.entry_reason||"")+'</div>'+
+      '<div class="reason exit"><b>EXIT IF:</b> '+(o.exit_reason||"")+'</div>'+
+      '<div class="reason risk"><b>RISK:</b> '+(o.risk_reason||"")+'</div>'+
+      '<button class="btn primary" onclick="openModal(\''+o.symbol+'\','+(o.current_price||0)+')">Add to Portfolio</button>'+
+    '</div></div>';
+}
+const VERDICT_PILL = { STRONG:"green", MODERATE:"blue", WEAK:"amber", AVOID:"red" };
+function deepBlock(o) {
+  const d = o.deep;
+  if (!d) {
+    return '<div class="reason" style="border-left-color:var(--faint);"><b>FUNDAMENTALS:</b> ⚠️ Not analyzed yet — use “Copy Analysis Prompt” below (3 min via Claude).</div>';
+  }
+  const chk = v => (v!==""&&v!==null&&!isNaN(Number(v))) ? (Number(v)>=15?'✅':Number(v)>=10?'•':'⚠️') : '';
+  const flags = (s,icon) => { const a=(s||"").split("|").map(x=>x.trim()).filter(Boolean); return a.length? '<div class="sub">'+icon+' '+a.join('<br>'+icon+' ')+'</div>':''; };
+  const stale = o.fundamentals_stale ? ' <span class="pill amber">'+o.fundamentals_age_days+'d old — re-analyse</span>' : '';
+  return '<div class="reason" style="border-left-color:var(--blue);">'+
+    '<div class="spread" style="margin-bottom:4px;"><b>FUNDAMENTALS <span class="faint" style="font-weight:400;">(AI est.)</span></b>'+
+      '<span class="pill '+(VERDICT_PILL[String(d.verdict).toUpperCase()]||"grey")+'">'+(d.verdict||"—")+' · '+fmt(d.confidence,0)+'</span></div>'+
+    '<div class="kv"><span class="lbl">Rev CAGR 5y</span><span>'+fmt(d.revenue_cagr_5yr,1)+'% '+chk(d.revenue_cagr_5yr)+'</span></div>'+
+    '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>'+fmt(d.profit_cagr_5yr,1)+'% '+chk(d.profit_cagr_5yr)+'</span></div>'+
+    '<div class="kv"><span class="lbl">ROE 5y avg</span><span>'+fmt(d.roe_avg_5yr,1)+'% '+chk(d.roe_avg_5yr)+'</span></div>'+
+    '<div class="kv"><span class="lbl">Debt/Equity</span><span>'+fmt(d.debt_to_equity,2)+' ('+(d.debt_trend||"—")+')</span></div>'+
+    '<div class="kv"><span class="lbl">Promoter</span><span>'+fmt(d.promoter_holding,1)+'% ('+(d.promoter_trend||"—")+'), pledge '+fmt(d.promoter_pledge,1)+'%</span></div>'+
+    '<div class="kv"><span class="lbl">AI risk</span><span>'+(d.ai_disruption_risk||"—")+'</span></div>'+
+    (d.business_moat? '<div class="sub" style="margin-top:4px;">✅ Moat: '+d.business_moat+'</div>':'')+
+    flags(d.red_flags,'⚠️') + flags(d.green_flags,'✅') + stale +
+  '</div>';
+}
+
+/* ---- Fundamental analysis (human-in-the-loop) ---- */
+function buildDeepPrompt(symbols) {
+  return [
+"You are a fundamental analyst for Indian large-cap (NSE) stocks.",
+"Analyse these stocks and return ONLY a single JSON object — no prose, no markdown, no backticks.",
+"If you add ANY text outside the JSON, the tool fails to parse it.",
+"",
+"Stocks: " + symbols.join(", "),
+"",
+"For EACH stock return these keys:",
+"revenue_cagr_3yr, revenue_cagr_5yr, profit_cagr_3yr, profit_cagr_5yr (numbers, %),",
+"roe_latest, roe_avg_3yr, roe_avg_5yr, roce_latest (numbers, %),",
+"debt_to_equity (number), debt_trend (INCREASING|DECREASING|STABLE|ZERO),",
+"cf_quality (Operating CF / Net Profit, number),",
+"promoter_holding, promoter_pledge (numbers, %), promoter_trend (INCREASING|DECREASING|STABLE),",
+"red_flags (array of strings), green_flags (array of strings),",
+"business_moat (one line), ai_disruption_risk ('HIGH|MEDIUM|LOW — reason'),",
+"verdict (STRONG|MODERATE|WEAK|AVOID), confidence (0-100), analysis_date (YYYY-MM-DD).",
+"",
+"Be conservative. If unsure of a number, give your best estimate AND add to red_flags: 'Data unverified — manual check recommended'.",
+"",
+"Shape (keys are the stock symbols):",
+'{ "' + (symbols[0]||"SYM") + '": { "revenue_cagr_5yr": 11.4, "profit_cagr_5yr": 13.8, "roe_avg_5yr": 41.8, "debt_to_equity": 0.0, "debt_trend": "ZERO", "cf_quality": 0.94, "promoter_holding": 72.3, "promoter_pledge": 0.0, "promoter_trend": "STABLE", "red_flags": [], "green_flags": ["Zero debt"], "business_moat": "...", "ai_disruption_risk": "MEDIUM — ...", "verdict": "STRONG", "confidence": 88, "analysis_date": "'+new Date().toISOString().slice(0,10)+'" } }'
+  ].join("\n");
+}
+async function copyDeepPrompt() {
+  if (!OPP_SYMBOLS.length) { toast("No opportunities to analyse", false); return; }
+  const text = buildDeepPrompt(OPP_SYMBOLS);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+    else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+    toast("Prompt copied — paste into Claude.ai");
+  } catch(e){
+    // last-resort: drop it into the paste box so the user can copy manually
+    document.getElementById("deepJson").value = text; deepCount();
+    toast("Copy blocked — prompt placed in the box; copy it manually", false);
+  }
+}
+function deepCount() {
+  document.getElementById("deepCountLbl").textContent = (document.getElementById("deepJson").value||"").length + " chars";
+}
+function cleanJson(s) {
+  let t = (s||"").trim();
+  if (t.indexOf("```") >= 0) t = t.replace(/```json/gi,"").replace(/```/g,"").trim();
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a >= 0 && b > a) t = t.slice(a, b+1);
+  return t;
+}
+async function saveDeep() {
+  const box = document.getElementById("deepJson");
+  const cleaned = cleanJson(box.value);
+  let parsed;
+  try { parsed = JSON.parse(cleaned); }
+  catch(e){ toast("Invalid JSON — check Claude's reply and retry", false); return; }
+  const btn = document.getElementById("saveDeepBtn"); btn.disabled = true;
+  try {
+    const r = await api("saveDeepAnalysis", { analysis: parsed });
+    toast("Saved fundamentals for "+r.saved+" stock(s)");
+    document.getElementById("deepFresh").textContent = "saved just now";
+    box.value = ""; deepCount();
+    loadOpportunities();
+  } catch(e){ toast(e.message, false); }
+  finally { btn.disabled = false; }
+}
+
+/* ===================================================================== */
+/*  SECTION 4 — PORTFOLIO                                                */
+/* ===================================================================== */
+async function loadPortfolio() {
+  try {
+    const d = await api("getPortfolioData");
+    const s = d.summary;
+    document.getElementById("pfFresh").textContent = "updated "+ago(s.timestamp);
+    document.getElementById("pfSummary").innerHTML =
+      stat("Invested", rupee(s.totalInvested)) +
+      stat("Current", rupee(s.currentValue)) +
+      stat("P&L", rupee(s.totalPnL)+' ('+fmt(s.totalPnLPct,1)+'%)', s.totalPnL>=0?'pos':'neg') +
+      stat("Positions", s.positionCount) +
+      stat("Capital left", rupee(s.capitalRemaining));
+    const active = d.positions.filter(p => Number(p.quantity) > 0);
+    if (!active.length) { document.getElementById("pfBody").innerHTML = '<div class="center">No open positions yet. Add one from an opportunity above.</div>'; return; }
+    let html = '<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>LTP</th><th class="hide">Qty</th><th class="hide">Invested</th><th>Value</th><th>P&L</th><th class="hide">T1 / T2 / SL</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+    active.forEach(p => {
+      const pnl = Number(p.unrealised_pnl)||0;
+      html += '<tr>'+
+        '<td><b>'+p.symbol+'</b><div class="sub">'+(p.paper_trade===true||String(p.paper_trade).toUpperCase()==="TRUE"?'paper':'live')+' · '+(p.days_held||0)+'d</div></td>'+
+        '<td>'+rupee(p.current_price)+'</td>'+
+        '<td class="hide">'+fmt(p.quantity,0)+'</td>'+
+        '<td class="hide">'+rupee(p.invested_amount)+'</td>'+
+        '<td>'+rupee(p.current_value)+'</td>'+
+        '<td class="'+(pnl>=0?'v pos':'v neg')+'" style="font-size:13px;">'+rupee(pnl)+'<div class="sub '+(pnl>=0?'v pos':'v neg')+'">'+fmt(p.unrealised_pnl_pct,1)+'%</div></td>'+
+        '<td class="hide sub">'+rupee(p.target_1_price,0)+' / '+rupee(p.target_2_price,0)+' / '+rupee(p.stop_loss_price,0)+'</td>'+
+        '<td><span class="badge '+(p.alert_status||'HOLD')+'">'+(p.alert_status||'HOLD').replace(/_/g,' ')+'</span></td>'+
+        '<td><button class="btn small" onclick="book(\''+p.id+'\',50)">Book 50%</button> <button class="btn small danger" onclick="book(\''+p.id+'\',100)">Exit</button></td>'+
+      '</tr>';
+    });
+    document.getElementById("pfBody").innerHTML = html + '</tbody></table></div>';
+  } catch(e){ errBox("pfBody", e); }
+}
+function stat(k,v,cls){ return '<div class="stat"><div class="k">'+k+'</div><div class="v '+(cls||"")+'" style="font-size:16px;">'+v+'</div></div>'; }
+async function book(id, pct) {
+  if (!confirm(pct===100?"Exit this position fully?":"Book 50% of this position?")) return;
+  try { const r = await api("bookProfit", {positionId:id, percentage:pct}); toast("Booked "+r.soldQty+" @ "+rupee(r.price)+" · profit "+rupee(r.profit)); loadAll(); }
+  catch(e){ toast(e.message,false); }
+}
+
+/* ===================================================================== */
+/*  SECTION 5 — SCREENER                                                 */
+/* ===================================================================== */
+let scrLoaded = false;
+function toggleScreener(){
+  const p = document.getElementById("scrPanel");
+  const open = p.style.display==="none";
+  p.style.display = open ? "block" : "none";
+  document.getElementById("scrCaret").textContent = open ? "▾" : "▸";
+  if (open && !scrLoaded) loadScreener();
+}
+async function loadScreener() {
+  try {
+    const d = await api("getScreenerData");
+    SCREENER_ROWS = d.rows; scrLoaded = true;
+    document.getElementById("scrCounts").textContent = "(✓"+(d.counts.PASS||0)+" ✗"+(d.counts.FAIL||0)+" ◌"+(d.counts.INSUFFICIENT_DATA||0)+")";
+    document.getElementById("scrFresh").textContent = d.lastUpdated ? "screened "+ago(toISO(d.lastUpdated)) : "never run";
+    const sectors = [...new Set(d.rows.map(r=>r.sector).filter(Boolean))].sort();
+    const sel = document.getElementById("scrSector");
+    sel.innerHTML = '<option value="">All sectors</option>' + sectors.map(s=>'<option>'+s+'</option>').join("");
+    renderScreener();
+  } catch(e){ errBox("scrBody", e); }
+}
+function renderScreener() {
+  const sec = document.getElementById("scrSector").value;
+  const st  = document.getElementById("scrStatus").value;
+  const sort= document.getElementById("scrSort").value;
+  let rows = SCREENER_ROWS.filter(r => (!sec||r.sector===sec) && (!st||r.screening_status===st));
+  rows.sort((a,b)=> (Number(b[sort])||-999) - (Number(a[sort])||-999));
+  if (!rows.length){ document.getElementById("scrBody").innerHTML='<div class="center">No rows. Run the screener first.</div>'; return; }
+  const sc = s => s==="PASS"?"green":s==="FAIL"?"red":"grey";
+  let html = '<div style="overflow-x:auto;"><table><thead><tr><th>Stock</th><th>Sector</th><th>Rev CAGR</th><th>Profit CAGR</th><th>ROE</th><th class="hide">D/E</th><th>Conf</th><th>Status</th><th class="hide">Reasons</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    html += '<tr>'+
+      '<td><b>'+r.symbol+'</b></td><td class="sub">'+(r.sector||"")+'</td>'+
+      '<td>'+fmt(r.revenue_cagr_5yr,1)+'%</td><td>'+fmt(r.profit_cagr_5yr,1)+'%</td>'+
+      '<td>'+fmt(r.roe_avg_5yr,1)+'%</td><td class="hide">'+fmt(r.debt_to_equity,2)+'</td>'+
+      '<td>'+fmt(r.confidence_score,0)+'</td>'+
+      '<td><span class="pill '+sc(r.screening_status)+'">'+r.screening_status.replace("INSUFFICIENT_DATA","NO DATA")+'</span></td>'+
+      '<td class="hide sub" style="max-width:240px;">'+(r.fail_reasons||"")+'</td>'+
+    '</tr>';
+  });
+  document.getElementById("scrBody").innerHTML = html+'</tbody></table></div>';
+}
+async function runFullScreener() {
+  if (!confirm("Run the full 100-stock fundamental screen now? This takes ~10–15 minutes and is normally automatic on Sundays.")) return;
+  const btn = document.getElementById("runScrBtn"); btn.disabled=true; btn.textContent="Running… (keep tab open)";
+  try { const r = await api("runFundamentalScreener"); toast("Screen done: "+r.passed+" pass / "+r.failed+" fail / "+r.insufficient+" no-data"); scrLoaded=false; loadScreener(); }
+  catch(e){ toast(e.message,false); }
+  finally { btn.disabled=false; btn.textContent="Run Full Screener (weekly · ~10–15 min)"; }
+}
+
+/* ===================================================================== */
+/*  MODAL — add position                                                */
+/* ===================================================================== */
+function openModal(symbol, price) {
+  document.getElementById("mSymbol").value = symbol;
+  document.getElementById("mPrice").value = price || "";
+  document.getElementById("mQty").value = "";
+  document.getElementById("mAmt").value = "";
+  document.getElementById("mWarn").textContent = CONFIG.paper ? "Paper-trade mode: this is simulated, no real order." : "LIVE mode: this will mirror to your real-money sheet.";
+  document.getElementById("modalBg").style.display = "flex";
+}
+function closeModal(){ document.getElementById("modalBg").style.display = "none"; }
+function mCalc(){
+  const p = Number(document.getElementById("mPrice").value)||0;
+  const q = Number(document.getElementById("mQty").value)||0;
+  document.getElementById("mAmt").value = p&&q ? rupee(p*q) : "";
+}
+async function confirmAdd() {
+  const symbol = document.getElementById("mSymbol").value;
+  const entry_price = Number(document.getElementById("mPrice").value);
+  const quantity = Number(document.getElementById("mQty").value);
+  if (!entry_price||!quantity){ toast("Enter price and quantity",false); return; }
+  const btn = document.getElementById("mConfirm"); btn.disabled=true;
+  try {
+    const r = await api("addPosition", {symbol, entry_price, quantity});
+    if (r.success===false){ toast(r.error+(r.detail?" — "+r.detail:""),false); }
+    else { toast("Added "+symbol+(r.warnings&&r.warnings.length?" (with warnings)":"")); closeModal(); loadAll(); }
+  } catch(e){ toast(e.message,false); }
+  finally { btn.disabled=false; }
+}
+
+/* ===================================================================== */
+/*  BOOTSTRAP                                                            */
+/* ===================================================================== */
+function toISO(s){ // sheet datetime "yyyy-MM-dd HH:mm" -> ISO-ish for ago()
+  if (!s) return null; if (String(s).indexOf("T")>0) return s;
+  return String(s).replace(" ","T")+":00+05:30";
+}
+async function loadAll() {
+  document.getElementById("refreshAll").disabled = true;
+  await Promise.all([ loadHealth(), loadAlerts(), loadOpportunities(), loadPortfolio() ]);
+  if (scrLoaded) loadScreener();
+  document.getElementById("refreshAll").disabled = false;
+}
+window.addEventListener("DOMContentLoaded", () => {
+  if (WEB_APP_URL.indexOf("PASTE_")===0) {
+    document.querySelector(".wrap").insertAdjacentHTML("afterbegin",
+      '<div class="err" style="margin-bottom:14px;">Set <b>WEB_APP_URL</b> at the top of the &lt;script&gt; block in index.html to your deployed Apps Script Web App URL, then reload.</div>');
+  }
+  loadAll();
+});
+</script>
+</body>
+</html>

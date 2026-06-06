@@ -274,6 +274,16 @@ h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight:
 .kpis { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-sub); }
 .detail-toggle { color: var(--text-sub); }
 
+/* Grade tiers (Steel < Copper < Silver < Gold) */
+.tier { padding: 3px 10px; font-size: 11px; font-weight: 800; letter-spacing: .4px; border-radius: 999px; white-space: nowrap; }
+.tier.gold { color: #2a1c00; background: linear-gradient(135deg, #fde68a, #f59e0b); }
+.tier.silver { color: #1a1a1a; background: linear-gradient(135deg, #e5e7eb, #9ca3af); }
+.tier.copper { color: #2a1404; background: linear-gradient(135deg, #e8a06a, #b87333); }
+.tier.steel { color: var(--text); background: #39434f; }
+.chip.gold { border-color: #f59e0b; }
+.chip.silver { border-color: #9ca3af; }
+.chip.copper { border-color: #b87333; }
+
 /* Glossary (collapsible plain-English legend) */
 .glossary { margin-bottom: 12px; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); }
 .glossary dl { margin-top: 8px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12px; }

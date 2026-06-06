@@ -36,6 +36,15 @@ function toast(msg, ok) {
   setTimeout(() => { t.className = 'toast'; }, 3200);
 }
 
+// Grade tier from the 0-100 conviction score (thresholds easy to tweak).
+function tierFor(score) {
+  const s = Number(score) || 0;
+  if (s >= 80) return { name: 'GOLD', cls: 'gold', icon: '🥇', blurb: 'Excellent, rare — don\'t miss' };
+  if (s >= 70) return { name: 'SILVER', cls: 'silver', icon: '🥈', blurb: 'Good — solid profit potential' };
+  if (s >= 60) return { name: 'COPPER', cls: 'copper', icon: '🥉', blurb: 'Decent — some money to make' };
+  return { name: 'STEEL', cls: 'steel', icon: '⚙️', blurb: 'An opportunity — don\'t sweat it' };
+}
+
 function errBox(containerId, e) {
   document.getElementById(containerId).innerHTML =
     '<div class="err">⚠ ' + (e.message || e) + ' <button class="btn small ml-8" data-act="reload">Retry</button></div>';
@@ -158,8 +167,8 @@ async function loadOpportunities() {
 
     // 10-name candidate strip (max 3 per sector) — quick glance over the pool.
     const chips = d.opportunities.map(o =>
-      '<span class="chip' + (o.shortlisted ? ' short' : '') + '">' + (o.shortlisted ? '★ ' : '') + o.symbol +
-      '<span class="chip-sec">' + (o.sector || '') + '</span></span>').join('');
+      '<span class="chip ' + tierFor(o.final_score).cls + (o.shortlisted ? ' short' : '') + '">' +
+      (o.shortlisted ? '★ ' : '') + o.symbol + '<span class="chip-sec">' + (o.sector || '') + '</span></span>').join('');
     html += '<div class="sub mb-8">' + d.count + ' candidates · max 3 per sector · ★ = shortlist</div>';
     html += '<div class="chips">' + chips + '</div>';
 
@@ -185,6 +194,7 @@ function oppCard(o) {
   const offLabel = (o.avg_pe_5yr === '' || o.avg_pe_5yr === null) ? 'off high' : 'vs avg PE';
   const mark = (o.shortlisted ? '★ ' : '') + (o.analyzed ? '🔬' : '⚠️');
   const conviction = fmt(o.final_score, 0);              // same number the Buy Plan ranks on
+  const t = tierFor(o.final_score);
   const verdictChip = o.analyzed
     ? '<span class="pill ' + (VERDICT_PILL[o.verdict] || 'grey') + '">' + o.verdict + '</span>'
     : '<span class="pill grey">not analysed</span>';
@@ -195,9 +205,13 @@ function oppCard(o) {
       '<div class="price">' + rupee(o.current_price) + '</div></div>' +
       '<span class="pill pill-head">' + o.valuation_status.replace('_', ' ') + '</span></div>' +
     '<div class="body">' +
-      // Headline: one conviction number + the verdict word.
-      '<div class="conv"><div class="conv-num">' + conviction + '<span class="conv-den">/100</span></div>' +
-        '<div class="conv-lbl">Conviction ' + verdictChip + '</div></div>' +
+      // Headline: grade tier + conviction number + verdict word.
+      '<div class="conv">' +
+        '<span class="tier ' + t.cls + '" title="' + t.blurb + '">' + t.icon + ' ' + t.name + '</span>' +
+        '<span class="conv-num">' + conviction + '<span class="conv-den">/100</span></span>' +
+        verdictChip +
+      '</div>' +
+      '<div class="sub conv-lbl">Conviction · ' + t.blurb + '</div>' +
       // Compact stat line.
       '<div class="kpis"><span>PE ' + fmt(o.current_pe, 1) + 'x</span>' +
         '<span class="' + cheap + '">' + disc + ' ' + offLabel + '</span>' +
@@ -458,7 +472,7 @@ function renderBuyPlan() {
       '<td>' + r.shares + '</td>' +
       '<td>' + rupee(r.amount, 0) + '</td>' +
       '<td>' + fmt(r.weight, 0) + '%</td>' +
-      '<td class="hide">' + r.score + '</td>' +
+      '<td class="hide">' + r.score + ' <span class="tier ' + tierFor(r.score).cls + '">' + tierFor(r.score).name + '</span></td>' +
       '<td><button class="btn small" data-act="planAdd" data-symbol="' + r.symbol + '" data-price="' + r.price + '" data-qty="' + r.shares + '">Add</button></td>' +
     '</tr>';
   });

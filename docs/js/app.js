@@ -66,6 +66,8 @@ function uiConfirm(message) {
 async function loadHealth() {
   try {
     const [h, s] = await Promise.all([api('getMarketHealth'), api('getPortfolioSummary')]);
+    _health = h;
+    _summary = s;
     _config.paper = s.paperTradeMode;
 
     const badge = document.getElementById('modeBadge');
@@ -133,6 +135,7 @@ async function markDone(createdAt, symbol, type) {
 async function loadOpportunities() {
   try {
     const d = await api('getOpportunityData');
+    _opps = d.opportunities;
     _oppSymbols = d.opportunities.map(o => o.symbol);
     const analyzed = d.analyzedCount || 0;
     const n = d.shortlistSize || 5;
@@ -336,6 +339,127 @@ async function saveDeep() {
   }
 }
 
+// ── Buy plan ────────────────────────────────────────────────────────────────
+// Score-weighted, whole-share allocation across the shortlist within available
+// capital. Tranches in a weak market (deploy ~60%, keep dry powder), caps any
+// single name at 40% (when >=3 names), then tops up leftover by conviction.
+function buildBuyPlan(capital) {
+  const caution = _health && _health.isAbove200DMA === false;
+  const deployFrac = caution ? 0.6 : 1.0;
+  const deployable = Math.floor(capital * deployFrac);
+  const reserved = capital - deployable;
+
+  const eligible = (_opps || []).filter(o =>
+    o.shortlisted &&
+    (o.valuation_status === 'STRONG_BUY' || o.valuation_status === 'BUY') &&
+    o.verdict !== 'WEAK' && o.verdict !== 'AVOID' &&
+    Number(o.current_price) > 0 && Number(o.current_price) <= deployable);
+
+  if (!eligible.length) {
+    return { rows: [], deployable, reserved, invested: 0, leftover: deployable, caution,
+      note: 'No buy-worthy names within budget right now — holding cash is fine.' };
+  }
+
+  const n = eligible.length;
+  const maxW = n >= 3 ? 0.40 : 0.60;                       // per-name concentration cap
+  const cap = Math.floor(deployable * maxW);
+  const totalScore = eligible.reduce((a, o) => a + (Number(o.final_score) || Number(o.confidence_score) || 1), 0);
+
+  // Base whole-share allocation, weighted by score, clamped to the cap.
+  const plan = eligible.map(o => {
+    const score = Number(o.final_score) || Number(o.confidence_score) || 1;
+    const price = Number(o.current_price);
+    const target = Math.min(deployable * (score / totalScore), cap);
+    return { o, price, score, shares: Math.floor(target / price) };
+  });
+
+  // Greedy top-up: spend leftover on the highest-score name that still fits.
+  let spent = plan.reduce((a, p) => a + p.shares * p.price, 0);
+  let leftover = deployable - spent;
+  let added = true;
+  while (added) {
+    added = false;
+    const cands = plan.filter(p => p.price <= leftover && (p.shares + 1) * p.price <= cap);
+    if (cands.length) {
+      cands.sort((a, b) => b.score - a.score);
+      cands[0].shares += 1;
+      leftover -= cands[0].price;
+      spent += cands[0].price;
+      added = true;
+    }
+  }
+
+  const rows = plan.filter(p => p.shares > 0).map(p => ({
+    symbol: p.o.symbol, sector: p.o.sector || '', status: p.o.valuation_status,
+    verdict: p.o.verdict, score: Math.round(p.score), price: p.price,
+    shares: p.shares, amount: p.shares * p.price,
+    weight: spent > 0 ? (p.shares * p.price / spent) * 100 : 0,
+  })).sort((a, b) => b.amount - a.amount);
+
+  const sectorMix = {};
+  rows.forEach(r => { sectorMix[r.sector] = (sectorMix[r.sector] || 0) + r.amount; });
+
+  return { rows, deployable, reserved, invested: spent, leftover: deployable - spent, caution, sectorMix, note: null };
+}
+
+function renderBuyPlan() {
+  const inp = document.getElementById('planCapital');
+  let capital = Number(inp.value);
+  if (!capital || capital <= 0) {
+    capital = (_summary && _summary.capitalRemaining) || 0;
+    if (capital > 0) inp.value = capital;
+  }
+  const body = document.getElementById('planBody');
+  if (!capital || capital <= 0) {
+    body.innerHTML = '<div class="center">No capital available within the phase limit. Free up capital or raise the limit in config.</div>';
+    return;
+  }
+  if (!_opps || !_opps.length) {
+    body.innerHTML = '<div class="center">No opportunities to plan from yet.</div>';
+    return;
+  }
+
+  const p = buildBuyPlan(capital);
+  if (!p.rows.length) {
+    body.innerHTML = '<div class="center">' + p.note + '</div>';
+    return;
+  }
+
+  let html = '';
+  if (p.caution) {
+    html += '<div class="reason exit mb-12"><b>Market caution:</b> Nifty is below its 200-DMA, so this plan deploys ' +
+      'only ~60% now (' + rupee(p.deployable, 0) + ') and keeps ' + rupee(p.reserved, 0) + ' as dry powder for a deeper dip.</div>';
+  }
+  html += '<div class="grid pf-summary mb-12">' +
+    statCard('Deploy now', rupee(p.invested, 0)) +
+    statCard('Leftover cash', rupee(p.leftover, 0)) +
+    statCard('Dry powder', rupee(p.reserved, 0)) +
+    statCard('Names', String(p.rows.length)) +
+    '</div>';
+
+  html += '<div class="scroll-x"><table><thead><tr>' +
+    '<th>Stock</th><th>Price</th><th>Shares</th><th>Amount</th><th>Weight</th>' +
+    '<th class="hide">Score</th><th>Add</th></tr></thead><tbody>';
+  p.rows.forEach(r => {
+    html += '<tr>' +
+      '<td><b>' + r.symbol + '</b><div class="sub">' + r.sector + '</div></td>' +
+      '<td>' + rupee(r.price) + '</td>' +
+      '<td>' + r.shares + '</td>' +
+      '<td>' + rupee(r.amount, 0) + '</td>' +
+      '<td>' + fmt(r.weight, 0) + '%</td>' +
+      '<td class="hide">' + r.score + '</td>' +
+      '<td><button class="btn small" data-act="planAdd" data-symbol="' + r.symbol + '" data-price="' + r.price + '" data-qty="' + r.shares + '">Add</button></td>' +
+    '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  const mix = Object.keys(p.sectorMix).sort((a, b) => p.sectorMix[b] - p.sectorMix[a])
+    .map(s => s + ' ' + Math.round(p.sectorMix[s] / p.invested * 100) + '%').join(' · ');
+  html += '<div class="sub mt-8">Sector mix: ' + mix + ' · whole shares only · suggestion, verify before buying.</div>';
+
+  body.innerHTML = html;
+}
+
 // ── Portfolio ─────────────────────────────────────────────────────────────
 async function loadPortfolio() {
   try {
@@ -474,14 +598,14 @@ async function runFullScreener() {
 }
 
 // ── Add-position modal ──────────────────────────────────────────────────────
-function openModal(symbol, price) {
+function openModal(symbol, price, qty) {
   document.getElementById('mSymbol').value = symbol;
   document.getElementById('mPrice').value = price || '';
-  document.getElementById('mQty').value = '';
-  document.getElementById('mAmt').value = '';
+  document.getElementById('mQty').value = qty || '';
   document.getElementById('mWarn').textContent = _config.paper
     ? 'Paper-trade mode: this is simulated, no real order.'
     : 'LIVE mode: this will mirror to your real-money sheet.';
+  mCalc();
   document.getElementById('modalBg').classList.add('show');
 }
 
@@ -573,6 +697,8 @@ function wireEvents() {
   document.getElementById('mCancel').addEventListener('click', closeModal);
   document.getElementById('mConfirm').addEventListener('click', confirmAdd);
   document.getElementById('mQty').addEventListener('input', mCalc);
+  document.getElementById('planBtn').addEventListener('click', renderBuyPlan);
+  document.getElementById('planCapital').addEventListener('keydown', e => { if (e.key === 'Enter') renderBuyPlan(); });
   document.getElementById('gateBtn').addEventListener('click', tryUnlock);
   document.getElementById('gateInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
   ['scrSector', 'scrStatus', 'scrSort'].forEach(id => {
@@ -587,6 +713,7 @@ function wireEvents() {
     if (act === 'reload') loadAll();
     else if (act === 'openModal') openModal(el.dataset.symbol, Number(el.dataset.price) || 0);
     else if (act === 'book') book(el.dataset.id, Number(el.dataset.pct));
+    else if (act === 'planAdd') openModal(el.dataset.symbol, Number(el.dataset.price) || 0, Number(el.dataset.qty) || '');
     else if (act === 'markDone') markDone(el.dataset.created || '', el.dataset.symbol, el.dataset.type);
   });
 }
@@ -596,6 +723,7 @@ async function loadAll() {
   const refresh = document.getElementById('refreshAll');
   refresh.disabled = true;
   await Promise.all([loadHealth(), loadAlerts(), loadOpportunities(), loadPortfolio()]);
+  renderBuyPlan();                       // uses the freshly loaded opps + health + capital
   if (_scrLoaded) loadScreener();
   refresh.disabled = false;
 }

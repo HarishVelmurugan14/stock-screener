@@ -31,3 +31,6 @@ let _config = {};            // server config snapshot (paper mode, etc.)
 let _screenerRows = [];       // cached screener rows for client-side filtering
 let _oppSymbols = [];         // current opportunity symbols, for the analysis prompt
 let _scrLoaded = false;       // has the screener section been loaded yet
+let _opps = [];               // last opportunities (with scores/prices) — for the buy plan
+let _health = null;           // last market-health snapshot
+let _summary = null;          // last portfolio summary (capital remaining, etc.)

@@ -497,8 +497,8 @@ async function loadPortfolio() {
         '<td class="' + cls + '">' + rupee(pnl) + '<div class="sub ' + cls + '">' + fmt(p.unrealised_pnl_pct, 1) + '%</div></td>' +
         '<td class="hide sub">' + rupee(p.target_1_price, 0) + ' / ' + rupee(p.target_2_price, 0) + ' / ' + rupee(p.stop_loss_price, 0) + '</td>' +
         '<td><span class="badge ' + status + '">' + status.replace(/_/g, ' ') + '</span></td>' +
-        '<td><button class="btn small" data-act="book" data-id="' + p.id + '" data-pct="50">Book 50%</button> ' +
-          '<button class="btn small danger" data-act="book" data-id="' + p.id + '" data-pct="100">Exit</button></td>' +
+        '<td><button class="btn small danger" data-act="sell" data-id="' + p.id + '" data-symbol="' + p.symbol +
+          '" data-qty="' + (Number(p.quantity) || 0) + '" data-price="' + (Number(p.current_price) || 0) + '">Sell…</button></td>' +
       '</tr>';
     });
     document.getElementById('pfBody').innerHTML = html + '</tbody></table></div>';
@@ -511,15 +511,55 @@ function statCard(k, v, cls) {
   return '<div class="stat"><div class="k">' + k + '</div><div class="v v-sm ' + (cls || '') + '">' + v + '</div></div>';
 }
 
-async function book(id, pct) {
-  const ok = await uiConfirm(pct === 100 ? 'Exit this position fully?' : 'Book 50% of this position?');
-  if (!ok) return;
+// ── Sell dialog (custom quantity) ───────────────────────────────────────────
+const _sell = { id: null, symbol: '', holding: 0, price: 0 };
+
+function openSell(id, symbol, holding, price) {
+  _sell.id = id;
+  _sell.symbol = symbol;
+  _sell.holding = holding;
+  _sell.price = price;
+  document.getElementById('sellTitle').textContent = 'Sell ' + symbol;
+  document.getElementById('sellInfo').textContent = 'You hold ' + holding + ' shares @ ~' + rupee(price) + '.';
+  const inp = document.getElementById('sellQty');
+  inp.max = holding;
+  inp.value = holding;                   // default = full exit
+  sellEst();
+  document.getElementById('sellBg').classList.add('show');
+  inp.focus();
+}
+
+function setSellPct(pct) {
+  const q = pct >= 100 ? _sell.holding : Math.floor(_sell.holding * pct / 100);
+  document.getElementById('sellQty').value = Math.max(1, q);
+  sellEst();
+}
+
+function sellEst() {
+  let q = Math.floor(Number(document.getElementById('sellQty').value) || 0);
+  if (q > _sell.holding) q = _sell.holding;
+  const remain = Math.max(0, _sell.holding - q);
+  document.getElementById('sellEst').textContent =
+    (q > 0 ? 'Selling ' + q + ' (~' + rupee(q * _sell.price, 0) + '), ' + remain + ' left.' : 'Enter a quantity.');
+}
+
+function closeSell() { document.getElementById('sellBg').classList.remove('show'); }
+
+async function confirmSell() {
+  let q = Math.floor(Number(document.getElementById('sellQty').value) || 0);
+  if (!(q > 0)) { toast('Enter shares to sell', false); return; }
+  if (q > _sell.holding) q = _sell.holding;
+  const btn = document.getElementById('sellConfirm');
+  btn.disabled = true;
   try {
-    const r = await api('bookProfit', { positionId: id, percentage: pct });
-    toast('Booked ' + r.soldQty + ' @ ' + rupee(r.price) + ' · profit ' + rupee(r.profit));
+    const r = await api('bookProfit', { positionId: _sell.id, quantity: q });
+    toast('Sold ' + r.soldQty + ' @ ' + rupee(r.price) + ' · profit ' + rupee(r.profit));
+    closeSell();
     loadAll();
   } catch (e) {
     toast(e.message, false);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -699,6 +739,12 @@ function wireEvents() {
   document.getElementById('mQty').addEventListener('input', mCalc);
   document.getElementById('planBtn').addEventListener('click', renderBuyPlan);
   document.getElementById('planCapital').addEventListener('keydown', e => { if (e.key === 'Enter') renderBuyPlan(); });
+  document.getElementById('sellQty').addEventListener('input', sellEst);
+  document.getElementById('sell25').addEventListener('click', () => setSellPct(25));
+  document.getElementById('sell50').addEventListener('click', () => setSellPct(50));
+  document.getElementById('sellAll').addEventListener('click', () => setSellPct(100));
+  document.getElementById('sellCancel').addEventListener('click', closeSell);
+  document.getElementById('sellConfirm').addEventListener('click', confirmSell);
   document.getElementById('gateBtn').addEventListener('click', tryUnlock);
   document.getElementById('gateInput').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
   ['scrSector', 'scrStatus', 'scrSort'].forEach(id => {
@@ -712,7 +758,7 @@ function wireEvents() {
     const act = el.dataset.act;
     if (act === 'reload') loadAll();
     else if (act === 'openModal') openModal(el.dataset.symbol, Number(el.dataset.price) || 0);
-    else if (act === 'book') book(el.dataset.id, Number(el.dataset.pct));
+    else if (act === 'sell') openSell(el.dataset.id, el.dataset.symbol, Number(el.dataset.qty) || 0, Number(el.dataset.price) || 0);
     else if (act === 'planAdd') openModal(el.dataset.symbol, Number(el.dataset.price) || 0, Number(el.dataset.qty) || '');
     else if (act === 'markDone') markDone(el.dataset.created || '', el.dataset.symbol, el.dataset.type);
   });

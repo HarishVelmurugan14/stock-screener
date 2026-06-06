@@ -137,6 +137,25 @@
   </div>
 </div>
 
+<!-- Sell modal (custom quantity) -->
+<div class="modal-bg" id="sellBg">
+  <div class="modal">
+    <h3 id="sellTitle">Sell</h3>
+    <div class="sub mb-10" id="sellInfo"></div>
+    <div class="field"><label>Shares to sell</label><input id="sellQty" type="number" min="1" step="1" /></div>
+    <div class="row mb-10">
+      <button class="btn small" id="sell25">25%</button>
+      <button class="btn small" id="sell50">50%</button>
+      <button class="btn small" id="sellAll">All</button>
+    </div>
+    <div class="sub mb-10" id="sellEst"></div>
+    <div class="row end">
+      <button class="btn" id="sellCancel">Cancel</button>
+      <button class="btn danger" id="sellConfirm">Sell</button>
+    </div>
+  </div>
+</div>
+
 <!-- Generic confirm modal -->
 <div class="modal-bg" id="confirmBg">
   <div class="modal">

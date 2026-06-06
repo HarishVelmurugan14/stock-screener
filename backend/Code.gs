@@ -1530,13 +1530,15 @@ function updatePortfolioPrices() {
   return { updated: updated, timestamp: nowISO_() };
 }
 
-// Book profit / exit. percentage = 50 (half) or 100 (full exit).
+// Book profit / exit. data = { positionId, quantity? , percentage? }:
+//   - quantity: exact shares to sell (custom amount) — takes precedence;
+//   - percentage: 1-100 fallback (100 = full exit), floored to whole shares.
 // Reduces quantity (or closes), logs a PROFIT_BOOKED alert, and mirrors a SELL
 // to VaultZero only when paper_trade_mode = FALSE.
-function bookProfit(positionId, percentage) {
+function bookProfit(data) {
   const cfg = getConfig();
-  const pct = toNum_(percentage);
-  if (![50, 100].includes(pct)) throw new Error('bookProfit: percentage must be 50 or 100');
+  const positionId = data && data.positionId;
+  if (!positionId) throw new Error('bookProfit: positionId required');
 
   const sh = getOrCreateTab_(TAB_PORTFOLIO);
   const positions = readTabObjects_(TAB_PORTFOLIO);
@@ -1544,10 +1546,22 @@ function bookProfit(positionId, percentage) {
   if (!p) throw new Error('bookProfit: position not found: ' + positionId);
 
   const qty = toNum_(p.quantity) || 0;
+  if (qty <= 0) throw new Error('bookProfit: nothing to sell');
+
+  // Resolve shares to sell — explicit quantity wins, else percentage of holding.
+  let sellQty;
+  if (data.quantity !== undefined && data.quantity !== null && data.quantity !== '') {
+    sellQty = Math.floor(toNum_(data.quantity));
+  } else {
+    const pct = toNum_(data.percentage);
+    if (pct === null) throw new Error('bookProfit: quantity or percentage required');
+    sellQty = pct >= 100 ? qty : Math.floor(qty * pct / 100);
+  }
+  if (!(sellQty > 0)) throw new Error('bookProfit: sell quantity must be at least 1 share');
+  if (sellQty > qty) sellQty = qty;                        // clamp to current holding
+
   const px = fetchNSEPrice(p.symbol);
   const cur = (px && px.lastPrice !== null) ? px.lastPrice : toNum_(p.current_price);
-  const sellQty = pct === 100 ? qty : Math.floor(qty * 0.5);
-  if (sellQty <= 0) throw new Error('bookProfit: nothing to sell');
 
   const entry = toNum_(p.entry_price);
   const proceeds = round2_(cur * sellQty);
@@ -1977,7 +1991,7 @@ function handleAction_(action, data) {
 
       // Actions
       case 'addPosition':            result = addPosition(data); break;
-      case 'bookProfit':             result = bookProfit(data.positionId, data.percentage); break;
+      case 'bookProfit':             result = bookProfit(data); break;
       case 'updatePortfolioPrices':  result = updatePortfolioPrices(); break;
       case 'actionAlert':            result = actionAlert(data); break;
       case 'updateConfig':           result = updateConfig(data); break;

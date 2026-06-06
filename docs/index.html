@@ -50,6 +50,18 @@
       <h2>Opportunities <span class="sub" id="oppCount"></span></h2>
       <span class="freshness" id="oppFresh"></span>
     </div>
+
+    <div class="glossary">
+      <div class="collapse-hd" id="glossHd"><span class="sub">ℹ️ What these numbers mean <span id="glossCaret">▸</span></span></div>
+      <dl class="hidden" id="glossBody">
+        <dt>Conviction</dt><dd>Our 0–100 score — how cheap (discount + PE) + reward-vs-risk + Claude's verdict. Higher = stronger idea; the Buy Plan weights by it.</dd>
+        <dt>Verdict</dt><dd>Claude's fundamental call: STRONG / MODERATE / WEAK. (AVOID names are hidden entirely.)</dd>
+        <dt>Off 52wk high</dt><dd>How far below its 1-year peak — more negative = cheaper.</dd>
+        <dt>R : R</dt><dd>Risk : reward. 1:1.7 means risking ₹1 (to the stop-loss) to make ₹1.7 (to Target 1).</dd>
+        <dt>200-DMA / Market</dt><dd>Nifty vs its 200-day average. Below it = CAUTION → the Buy Plan deploys in tranches and keeps dry powder.</dd>
+      </dl>
+    </div>
+
     <div class="center" id="oppBody"><span class="spinner"></span></div>
 
     <!-- Human-in-the-loop fundamental analysis -->

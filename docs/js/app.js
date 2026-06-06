@@ -182,11 +182,12 @@ async function loadOpportunities() {
 function oppCard(o) {
   const disc = (o.pe_discount_pct !== '' && o.pe_discount_pct !== null) ? Number(o.pe_discount_pct).toFixed(0) + '%' : '—';
   const cheap = Number(o.pe_discount_pct) < 0 ? 'v pos' : '';
-  const usingDD = o.avg_pe_5yr === '' || o.avg_pe_5yr === null;   // GF drawdown vs PE-average
-  const valLine = usingDD
-    ? '<div class="kv"><span class="lbl">Off 52wk high</span><span class="' + cheap + '">' + disc + '</span></div>'
-    : '<div class="kv"><span class="lbl">Avg PE</span><span>' + fmt(o.avg_pe_5yr, 1) + 'x <span class="' + cheap + '">(' + disc + ')</span></span></div>';
+  const offLabel = (o.avg_pe_5yr === '' || o.avg_pe_5yr === null) ? 'off high' : 'vs avg PE';
   const mark = (o.shortlisted ? '★ ' : '') + (o.analyzed ? '🔬' : '⚠️');
+  const conviction = fmt(o.final_score, 0);              // same number the Buy Plan ranks on
+  const verdictChip = o.analyzed
+    ? '<span class="pill ' + (VERDICT_PILL[o.verdict] || 'grey') + '">' + o.verdict + '</span>'
+    : '<span class="pill grey">not analysed</span>';
 
   return '<div class="card ' + o.valuation_status + '">' +
     '<div class="head"><div><div class="sym">' + mark + ' ' + o.symbol + '</div>' +
@@ -194,48 +195,58 @@ function oppCard(o) {
       '<div class="price">' + rupee(o.current_price) + '</div></div>' +
       '<span class="pill pill-head">' + o.valuation_status.replace('_', ' ') + '</span></div>' +
     '<div class="body">' +
-      '<div class="kv"><span class="lbl">Current PE</span><span>' + fmt(o.current_pe, 1) + 'x</span></div>' +
-      valLine +
-      '<div class="kv"><span class="lbl">Valuation conf.</span><span>' + fmt(o.confidence_score, 0) + '/100</span></div>' +
-      '<div class="kv"><span class="lbl">Risk : Reward</span><span>1 : ' + fmt(o.risk_reward_ratio, 1) + '</span></div>' +
-      deepBlock(o) +
+      // Headline: one conviction number + the verdict word.
+      '<div class="conv"><div class="conv-num">' + conviction + '<span class="conv-den">/100</span></div>' +
+        '<div class="conv-lbl">Conviction ' + verdictChip + '</div></div>' +
+      // Compact stat line.
+      '<div class="kpis"><span>PE ' + fmt(o.current_pe, 1) + 'x</span>' +
+        '<span class="' + cheap + '">' + disc + ' ' + offLabel + '</span>' +
+        '<span>R:R 1:' + fmt(o.risk_reward_ratio, 1) + '</span></div>' +
+      // Targets.
       '<div class="targets">' +
         '<div class="tbox t1"><div class="t">Target 1</div><div class="n">' + rupee(o.target_1_price, 0) + '</div><div class="sub">+' + fmt(o.target_1_upside_pct, 0) + '%</div></div>' +
         '<div class="tbox t2"><div class="t">Target 2</div><div class="n">' + rupee(o.target_2_price, 0) + '</div><div class="sub">+' + fmt(o.target_2_upside_pct, 0) + '%</div></div>' +
         '<div class="tbox sl"><div class="t">Stop</div><div class="n">' + rupee(o.stop_loss_price, 0) + '</div><div class="sub">-' + fmt(o.stop_loss_pct, 0) + '%</div></div>' +
       '</div>' +
-      '<div class="reason"><b>WHY:</b> ' + (o.entry_reason || '') + '</div>' +
-      '<div class="reason exit"><b>EXIT IF:</b> ' + (o.exit_reason || '') + '</div>' +
-      '<div class="reason risk"><b>RISK:</b> ' + (o.risk_reason || '') + '</div>' +
-      '<button class="btn primary" data-act="openModal" data-symbol="' + o.symbol + '" data-price="' + (o.current_price || 0) + '">Add to Portfolio</button>' +
+      '<div class="reason"><b>WHY</b> ' + (o.entry_reason || '') + '</div>' +
+      // Actions.
+      '<div class="spread">' +
+        '<button class="btn small detail-toggle" data-act="cardDetails">Details ▾</button>' +
+        '<button class="btn primary small" data-act="openModal" data-symbol="' + o.symbol + '" data-price="' + (o.current_price || 0) + '">Add to Portfolio</button>' +
+      '</div>' +
+      // Collapsible detail (hidden by default — progressive disclosure).
+      '<div class="card-detail hidden">' + detailBlock(o) + '</div>' +
     '</div></div>';
 }
 
-function deepBlock(o) {
+function detailBlock(o) {
   const d = o.deep;
-  if (!d) {
-    return '<div class="reason none"><b>FUNDAMENTALS:</b> ⚠️ Not analyzed yet — use “Copy Analysis Prompt” below (3 min via Claude).</div>';
+  let html = '';
+  if (d) {
+    const chk = v => (v !== '' && v !== null && !isNaN(Number(v))) ? (Number(v) >= 15 ? '✅' : Number(v) >= 10 ? '•' : '⚠️') : '';
+    const flags = (s, icon) => {
+      const a = (s || '').split('|').map(x => x.trim()).filter(Boolean);
+      return a.length ? '<div class="sub">' + icon + ' ' + a.join('<br>' + icon + ' ') + '</div>' : '';
+    };
+    html += '<div class="reason fund">' +
+      '<div class="sub mb-4"><b>Fundamentals</b> <span class="faint">— Claude estimate, verify before acting</span></div>' +
+      '<div class="kv"><span class="lbl">Rev CAGR 5y</span><span>' + fmt(d.revenue_cagr_5yr, 1) + '% ' + chk(d.revenue_cagr_5yr) + '</span></div>' +
+      '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>' + fmt(d.profit_cagr_5yr, 1) + '% ' + chk(d.profit_cagr_5yr) + '</span></div>' +
+      '<div class="kv"><span class="lbl">ROE 5y avg</span><span>' + fmt(d.roe_avg_5yr, 1) + '% ' + chk(d.roe_avg_5yr) + '</span></div>' +
+      '<div class="kv"><span class="lbl">Debt / Equity</span><span>' + fmt(d.debt_to_equity, 2) + ' (' + (d.debt_trend || '—') + ')</span></div>' +
+      '<div class="kv"><span class="lbl">Promoter</span><span>' + fmt(d.promoter_holding, 1) + '% (' + (d.promoter_trend || '—') + '), pledge ' + fmt(d.promoter_pledge, 1) + '%</span></div>' +
+      '<div class="kv"><span class="lbl">AI risk</span><span>' + (d.ai_disruption_risk || '—') + '</span></div>' +
+      (d.business_moat ? '<div class="sub mt-4">✅ Moat: ' + d.business_moat + '</div>' : '') +
+      flags(d.red_flags, '⚠️') + flags(d.green_flags, '✅') +
+      '<div class="sub mt-4">Claude confidence ' + fmt(d.confidence, 0) + '/100' +
+        (o.fundamentals_stale ? ' · <span class="pill amber">' + o.fundamentals_age_days + 'd old — re-analyse</span>' : '') + '</div>' +
+    '</div>';
+  } else {
+    html += '<div class="reason none">Not analysed yet — use “Copy Analysis Prompt” below (≈3 min via Claude) to add fundamentals.</div>';
   }
-  const chk = v => (v !== '' && v !== null && !isNaN(Number(v))) ? (Number(v) >= 15 ? '✅' : Number(v) >= 10 ? '•' : '⚠️') : '';
-  const flags = (s, icon) => {
-    const a = (s || '').split('|').map(x => x.trim()).filter(Boolean);
-    return a.length ? '<div class="sub">' + icon + ' ' + a.join('<br>' + icon + ' ') + '</div>' : '';
-  };
-  const stale = o.fundamentals_stale ? ' <span class="pill amber">' + o.fundamentals_age_days + 'd old — re-analyse</span>' : '';
-  const pill = VERDICT_PILL[String(d.verdict).toUpperCase()] || 'grey';
-
-  return '<div class="reason fund">' +
-    '<div class="spread mb-4"><b>FUNDAMENTALS <span class="faint">(AI est.)</span></b>' +
-      '<span class="pill ' + pill + '">' + (d.verdict || '—') + ' · ' + fmt(d.confidence, 0) + '</span></div>' +
-    '<div class="kv"><span class="lbl">Rev CAGR 5y</span><span>' + fmt(d.revenue_cagr_5yr, 1) + '% ' + chk(d.revenue_cagr_5yr) + '</span></div>' +
-    '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>' + fmt(d.profit_cagr_5yr, 1) + '% ' + chk(d.profit_cagr_5yr) + '</span></div>' +
-    '<div class="kv"><span class="lbl">ROE 5y avg</span><span>' + fmt(d.roe_avg_5yr, 1) + '% ' + chk(d.roe_avg_5yr) + '</span></div>' +
-    '<div class="kv"><span class="lbl">Debt/Equity</span><span>' + fmt(d.debt_to_equity, 2) + ' (' + (d.debt_trend || '—') + ')</span></div>' +
-    '<div class="kv"><span class="lbl">Promoter</span><span>' + fmt(d.promoter_holding, 1) + '% (' + (d.promoter_trend || '—') + '), pledge ' + fmt(d.promoter_pledge, 1) + '%</span></div>' +
-    '<div class="kv"><span class="lbl">AI risk</span><span>' + (d.ai_disruption_risk || '—') + '</span></div>' +
-    (d.business_moat ? '<div class="sub mt-4">✅ Moat: ' + d.business_moat + '</div>' : '') +
-    flags(d.red_flags, '⚠️') + flags(d.green_flags, '✅') + stale +
-  '</div>';
+  html += '<div class="reason exit"><b>EXIT IF</b> ' + (o.exit_reason || '') + '</div>';
+  html += '<div class="reason risk"><b>RISK</b> ' + (o.risk_reason || '') + '</div>';
+  return html;
 }
 
 // ── Fundamental analysis (human-in-the-loop) ────────────────────────────────
@@ -733,6 +744,10 @@ function wireEvents() {
   document.getElementById('saveDeepBtn').addEventListener('click', saveDeep);
   document.getElementById('deepJson').addEventListener('input', deepCount);
   document.getElementById('scrHeader').addEventListener('click', toggleScreener);
+  document.getElementById('glossHd').addEventListener('click', () => {
+    const open = document.getElementById('glossBody').classList.toggle('hidden') === false;
+    document.getElementById('glossCaret').textContent = open ? '▾' : '▸';
+  });
   document.getElementById('runScrBtn').addEventListener('click', runFullScreener);
   document.getElementById('mCancel').addEventListener('click', closeModal);
   document.getElementById('mConfirm').addEventListener('click', confirmAdd);
@@ -758,6 +773,10 @@ function wireEvents() {
     const act = el.dataset.act;
     if (act === 'reload') loadAll();
     else if (act === 'openModal') openModal(el.dataset.symbol, Number(el.dataset.price) || 0);
+    else if (act === 'cardDetails') {
+      const detail = el.closest('.card').querySelector('.card-detail');
+      el.textContent = detail.classList.toggle('hidden') ? 'Details ▾' : 'Details ▴';
+    }
     else if (act === 'sell') openSell(el.dataset.id, el.dataset.symbol, Number(el.dataset.qty) || 0, Number(el.dataset.price) || 0);
     else if (act === 'planAdd') openModal(el.dataset.symbol, Number(el.dataset.price) || 0, Number(el.dataset.qty) || '');
     else if (act === 'markDone') markDone(el.dataset.created || '', el.dataset.symbol, el.dataset.type);

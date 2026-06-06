@@ -265,6 +265,20 @@ h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight:
 .card .body { display: flex; flex-direction: column; gap: 10px; padding: 13px 14px; }
 .card-sector { color: rgba(255, 255, 255, .7); }
 .pill-head { color: #fff; background: rgba(255, 255, 255, .18); }
+
+/* Conviction headline + compact stat line */
+.conv { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.conv-num { font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
+.conv-den { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.conv-lbl { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-sub); }
+.kpis { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-sub); }
+.detail-toggle { color: var(--text-sub); }
+
+/* Glossary (collapsible plain-English legend) */
+.glossary { margin-bottom: 12px; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); }
+.glossary dl { margin-top: 8px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12px; }
+.glossary dt { font-weight: 700; color: var(--text); }
+.glossary dd { color: var(--text-sub); }
 .kv { display: flex; justify-content: space-between; font-size: 13px; }
 .kv .lbl { color: var(--text-sub); }
 .targets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }

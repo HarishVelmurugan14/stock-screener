@@ -70,16 +70,19 @@ HEADERS[TAB_ALERTS]        = [
   'message', 'action_required', 'is_actioned',
   'current_price', 'trigger_price', 'created_at'
 ];
-// Deep fundamentals supplied by a Claude analysis paste (human-in-the-loop).
-// These are LLM ESTIMATES — surfaced as such in the UI, never treated as verified.
+// Deep fundamentals from a Claude analysis paste (human-in-the-loop, sector-aware
+// mean-reversion schema). LLM ESTIMATES — surfaced as such, never treated as verified.
 HEADERS[TAB_DEEP]          = [
-  'symbol', 'verdict', 'confidence',
+  'symbol', 'sector', 'analysis_date',
+  'valuation_metric', 'current_valuation', 'historical_avg_valuation_5yr', 'valuation_discount_pct', 'valuation_verdict',
   'revenue_cagr_3yr', 'revenue_cagr_5yr', 'profit_cagr_3yr', 'profit_cagr_5yr',
-  'roe_latest', 'roe_avg_3yr', 'roe_avg_5yr', 'roce_latest',
-  'debt_to_equity', 'debt_trend', 'cf_quality',
-  'promoter_holding', 'promoter_pledge', 'promoter_trend',
-  'red_flags', 'green_flags', 'business_moat', 'ai_disruption_risk',
-  'analysis_date', 'source', 'raw_response', 'last_updated'
+  'roe_current', 'roe_5yr_avg', 'roce_current', 'debt_to_equity', 'operating_cf_to_net_profit',
+  'promoter_holding_pct', 'promoter_holding_trend',
+  'business_healthy', 'health_score', 'sector_specific_metrics',
+  'correction_reason', 'correction_reasoning', 'is_value_trap_risk',
+  'mean_reversion_thesis', 'recovery_catalyst', 'thesis_invalidation',
+  'key_risks', 'worst_case_scenario', 'max_drawdown_risk_pct',
+  'verdict', 'confidence', 'data_quality_flag', 'source', 'last_updated'
 ];
 
 // Default config values used by setupStockIQ(). phase dates filled at runtime.
@@ -349,6 +352,23 @@ function getOrCreateTab_(name) {
   return sh;
 }
 
+// Rewrite row 1 to the canonical HEADERS if it has drifted (schema evolution).
+// Data rows are preserved; new columns appear blank for old rows.
+function ensureHeaders_(name) {
+  const sh = ss_().getSheetByName(name);
+  if (!sh || !HEADERS[name]) return;
+  const want = HEADERS[name];
+  const width = Math.max(sh.getLastColumn(), want.length);
+  const cur = sh.getRange(1, 1, 1, width).getValues()[0];
+  let diff = cur.length < want.length;
+  for (let i = 0; i < want.length && !diff; i++) if (String(cur[i] || '') !== want[i]) diff = true;
+  if (diff) {
+    sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    log_('ensureHeaders_ updated header row for ' + name);
+  }
+}
+
 // Read a StockIQ tab as array-of-objects keyed by header.
 function readTabObjects_(name) {
   const sh = ss_().getSheetByName(name);
@@ -471,6 +491,7 @@ function setupStockIQ() {
   [TAB_CONFIG, TAB_FUNDAMENTALS, TAB_OPPORTUNITIES, TAB_PORTFOLIO, TAB_ALERTS, TAB_DEEP].forEach(function (name) {
     const existed = !!ss_().getSheetByName(name);
     getOrCreateTab_(name);
+    ensureHeaders_(name);                    // reconcile columns if the schema grew
     (existed ? summary.tabsExisting : summary.tabsCreated).push(name);
   });
   // Hidden GOOGLEFINANCE scratch tab (formula round-trips).
@@ -1751,28 +1772,24 @@ function getOpportunityData() {
   const deepMap = getDeepAnalysis().bySymbol;
   const today = new Date();
 
+  const isTrue_ = function (v) { return v === true || String(v).toUpperCase() === 'TRUE'; };
   const merged = [];
   rows.forEach(function (o) {
     const deep = deepMap[o.symbol] || null;
     const verdict = deep ? String(deep.verdict).toUpperCase() : '';
-    if (verdict === 'AVOID') return;                       // hard block
+    // Hard block: explicit AVOID, a flagged value trap, a structural (permanent)
+    // decline, or a failed business-health gate — never surface these as buys.
+    if (deep && (verdict === 'AVOID' || isTrue_(deep.is_value_trap_risk) ||
+        String(deep.correction_reason).toLowerCase() === 'structural' ||
+        (deep.business_healthy !== undefined && deep.business_healthy !== '' && !isTrue_(deep.business_healthy)))) {
+      return;
+    }
 
-    // Continuous valuation confidence (differentiates every stock).
-    let score = calculateValuationConfidence_({
-      discountPct: o.pe_discount_pct,        // PE-vs-avg discount or 52w drawdown (negative = cheap)
-      currentPE: o.current_pe,
-      avgPE: o.avg_pe_5yr,
-      riskReward: o.risk_reward_ratio,
-      profitable: true                       // every candidate passed screening
-    });
+    // Holistic, type-fair conviction (quality + value-the-right-way + verdict).
+    const score = calculateConviction_(o, deep);
 
-    // Verdict adjustment from the Claude analysis (STRONG bonus / WEAK penalty).
     let ageDays = null, stale = false;
     if (deep) {
-      if (verdict === 'STRONG')       score += 12;
-      else if (verdict === 'WEAK')    score -= 25;          // MODERATE = neutral (0)
-      const redCount = deep.red_flags ? String(deep.red_flags).split('|').filter(function (s) { return s.trim(); }).length : 0;
-      score -= Math.min(10, redCount * 2);                  // each red flag shaves a little
       if (verdict === 'WEAK') {
         o.valuation_status = 'WATCH';                       // value-trap guard: not a "BUY"
         o.weak = true;
@@ -1782,14 +1799,13 @@ function getOpportunityData() {
         if (!isNaN(d)) { ageDays = Math.round((today - d) / 86400000); stale = ageDays > 90; }
       }
     }
-    score = Math.max(0, Math.min(100, Math.round(score)));
 
     o.deep = deep;
     o.analyzed = !!deep;
     o.verdict = verdict;
     o.fundamentals_age_days = ageDays;
     o.fundamentals_stale = stale;
-    o.confidence_score = score;              // differentiated, verdict-aware (overrides the screen proxy)
+    o.confidence_score = score;              // shown as "Conviction"
     o.final_score = score;                   // ranking = the same score
     merged.push(o);
   });
@@ -1873,32 +1889,43 @@ function saveDeepAnalysis(data) {
   if (!symbols.length) throw new Error('saveDeepAnalysis: no stock objects found in JSON');
 
   getOrCreateTab_(TAB_DEEP);
+  ensureHeaders_(TAB_DEEP);                    // pick up schema additions without a manual setup
   const saved = [];
   symbols.forEach(function (sym) {
     const a = analysis[sym] || {};
+    const ssm = a.sector_specific_metrics;
     const row = {
       symbol: String(sym).toUpperCase(),
-      verdict: a.verdict ? String(a.verdict).toUpperCase() : '',
-      confidence: toNum_(a.confidence),
+      sector: a.sector || '',
+      analysis_date: a.analysis_date || fmtDate_(new Date()),
+      valuation_metric: a.valuation_metric || '',
+      current_valuation: toNum_(a.current_valuation),
+      historical_avg_valuation_5yr: toNum_(a.historical_avg_valuation_5yr),
+      valuation_discount_pct: toNum_(a.valuation_discount_pct),
+      valuation_verdict: a.valuation_verdict || '',
       revenue_cagr_3yr: toNum_(a.revenue_cagr_3yr), revenue_cagr_5yr: toNum_(a.revenue_cagr_5yr),
       profit_cagr_3yr: toNum_(a.profit_cagr_3yr),   profit_cagr_5yr: toNum_(a.profit_cagr_5yr),
-      roe_latest: toNum_(a.roe_latest), roe_avg_3yr: toNum_(a.roe_avg_3yr), roe_avg_5yr: toNum_(a.roe_avg_5yr),
-      roce_latest: toNum_(a.roce_latest),
-      debt_to_equity: toNum_(a.debt_to_equity), debt_trend: a.debt_trend || '',
-      cf_quality: toNum_(a.cf_quality),
-      promoter_holding: toNum_(a.promoter_holding), promoter_pledge: toNum_(a.promoter_pledge),
-      promoter_trend: a.promoter_trend || '',
-      red_flags: flagsToString_(a.red_flags), green_flags: flagsToString_(a.green_flags),
-      business_moat: a.business_moat || '', ai_disruption_risk: a.ai_disruption_risk || '',
-      analysis_date: a.analysis_date || fmtDate_(new Date()),
-      source: 'CLAUDE_MANUAL (LLM estimate)',
-      raw_response: '', last_updated: fmtDateTime_(new Date())
+      roe_current: toNum_(a.roe_current), roe_5yr_avg: toNum_(a.roe_5yr_avg),
+      roce_current: toNum_(a.roce_current), debt_to_equity: toNum_(a.debt_to_equity),
+      operating_cf_to_net_profit: toNum_(a.operating_cf_to_net_profit),
+      promoter_holding_pct: toNum_(a.promoter_holding_pct), promoter_holding_trend: a.promoter_holding_trend || '',
+      business_healthy: (a.business_healthy === true || String(a.business_healthy).toUpperCase() === 'TRUE'),
+      health_score: toNum_(a.health_score),
+      sector_specific_metrics: (ssm && typeof ssm === 'object') ? JSON.stringify(ssm) : (ssm || ''),
+      correction_reason: a.correction_reason || '', correction_reasoning: a.correction_reasoning || '',
+      is_value_trap_risk: (a.is_value_trap_risk === true || String(a.is_value_trap_risk).toUpperCase() === 'TRUE'),
+      mean_reversion_thesis: a.mean_reversion_thesis || '', recovery_catalyst: a.recovery_catalyst || '',
+      thesis_invalidation: a.thesis_invalidation || '',
+      key_risks: flagsToString_(a.key_risks), worst_case_scenario: a.worst_case_scenario || '',
+      max_drawdown_risk_pct: toNum_(a.max_drawdown_risk_pct),
+      verdict: a.verdict ? String(a.verdict).toUpperCase() : '',
+      confidence: toNum_(a.confidence), data_quality_flag: a.data_quality_flag || '',
+      source: 'CLAUDE_MANUAL (LLM estimate)', last_updated: fmtDateTime_(new Date())
     };
     upsertByKey_(TAB_DEEP, 'symbol', row);
     saved.push(row.symbol);
   });
 
-  // Store the raw paste once (debugging) without bloating every row.
   if (raw) { try { PropertiesService.getScriptProperties().setProperty('deep_raw_last', raw); } catch (e) {} }
 
   log_('saveDeepAnalysis: ' + saved.length + ' symbols -> ' + saved.join(', '));
@@ -2164,39 +2191,66 @@ function calculateValuationStatusGF_(price, high52, cfg) {
   return { status: status, discountPct: dd, ratio: null, basis: '52w_drawdown' };
 }
 
-// Continuous 0-100 confidence — every input scales smoothly so two cheap stocks
-// no longer collapse to the same banded number. Components (pre-verdict):
-//   discount  (max 40) — magnitude of PE-vs-avg discount OR 52w drawdown
-//   peCheap   (max 25) — absolute PE attractiveness (lower = higher)
-//   riskReward(max 20) — reward asymmetry to target
-//   base      (max 10) — profitable & priced (passed screening)
-// The Claude verdict adjustment (+STRONG / 0 MODERATE / -WEAK, minus red flags)
-// is applied separately in getOpportunityData where the analysis is joined.
-function calculateValuationConfidence_(o) {
-  let s = 0;
+// Holistic 0-100 conviction — fair across stock TYPES, not just beaten-down
+// names. Blends Quality + Value (measured the way each type is actually judged)
+// + Risk:reward + the Claude verdict. o = opportunity row, deep = Claude analysis.
+//   VALUE   (max 45): financials lean on the (P/B-aware) Claude read since banks
+//                     trade on P/B not PE/drawdown; others use PE-vs-avg / drawdown.
+//   QUALITY (max 35): growth + ROE + balance sheet from Claude (baseline if not analysed).
+//   R:R     (max 10): reward asymmetry to target.
+//   VERDICT (±):      STRONG +10 / MODERATE 0 / WEAK -20, minus red flags.
+function calculateConviction_(o, deep) {
+  const fin = ['Banking', 'NBFC', 'Insurance'].indexOf(o.sector) >= 0;
+  const scale = function (x, lo, hi, max) { return Math.max(0, Math.min(max, ((x - lo) / (hi - lo)) * max)); };
+  const conf = deep ? (toNum_(deep.confidence) || 0) : null;
 
-  // 1. How far below fair value — bigger discount/drawdown scores higher (max 40).
-  const discMag = Math.min(50, Math.max(0, -(toNum_(o.discountPct) || 0)));
-  s += (discMag / 50) * 40;
-
-  // 2. PE attractiveness vs own 5yr average if known, else an absolute band (max 25).
-  const pe = toNum_(o.currentPE);
-  const avg = toNum_(o.avgPE);
-  if (avg && avg > 0 && pe && pe > 0) {
-    const peDisc = Math.min(50, Math.max(0, (1 - pe / avg) * 100));
-    s += (peDisc / 50) * 25;
-  } else if (pe && pe > 0) {
-    s += Math.min(25, Math.max(0, ((40 - pe) / 40) * 25));
+  // ── VALUE (max 45) — prefer Claude's sector-appropriate discount % (PE/PB/EV,
+  //    all normalised to "% below own 5yr norm"); else legacy fallbacks. ──
+  let value;
+  const vdisc = deep ? toNum_(deep.valuation_discount_pct) : null;
+  const pe = toNum_(o.current_pe);
+  const peAvg = toNum_(o.avg_pe_5yr);
+  const dd = -(toNum_(o.pe_discount_pct) || 0);            // positive % below fair value / 52w high
+  if (vdisc !== null) {
+    value = scale(vdisc, 0, 40, 45);                       // type-fair: same number across sectors
+  } else if (fin) {
+    value = (conf !== null) ? scale(conf, 40, 90, 45) : scale(dd, 0, 50, 45);
+  } else if (peAvg && peAvg > 0 && pe && pe > 0) {
+    value = scale((1 - pe / peAvg) * 100, 0, 40, 45);
+  } else {
+    value = scale(dd, 0, 50, 45);
   }
 
-  // 3. Risk:reward — RR 1 -> 0, RR 3+ -> full (max 20).
-  const rr = toNum_(o.riskReward);
-  if (rr) s += Math.min(20, Math.max(0, ((rr - 1) / 2) * 20));
+  // ── QUALITY (max 35) — Claude's health_score if present; else derive. ──
+  let quality = 18;                                         // neutral baseline (passed screening)
+  const health = deep ? toNum_(deep.health_score) : null;
+  if (health !== null) {
+    quality = scale(health, 0, 100, 35);
+  } else if (deep) {
+    const roe = toNum_(deep.roe_5yr_avg !== undefined ? deep.roe_5yr_avg : deep.roe_avg_5yr);
+    const pcagr = toNum_(deep.profit_cagr_5yr);
+    const de = toNum_(deep.debt_to_equity);
+    quality =
+      (roe === null ? 4 : roe >= 20 ? 14 : roe >= 15 ? 10 : roe >= 12 ? 6 : 2) +
+      (pcagr === null ? 3 : pcagr >= 15 ? 11 : pcagr >= 10 ? 8 : pcagr >= 5 ? 4 : 0) +
+      (fin ? 7 : (de === null ? 4 : de === 0 ? 10 : de <= 0.5 ? 7 : de <= 1 ? 4 : 0));
+  }
 
-  // 4. Profitable & priced baseline (max 10).
-  if (o.profitable) s += 10;
+  // ── RISK:REWARD (max 10) ──
+  const rr = toNum_(o.risk_reward_ratio);
+  const rrPts = rr ? Math.max(0, Math.min(10, ((rr - 1) / 2) * 10)) : 0;
 
-  return Math.round(Math.min(100, Math.max(0, s)));
+  let score = value + quality + rrPts;
+
+  // ── VERDICT + cyclical bonus ──
+  if (deep) {
+    const v = String(deep.verdict).toUpperCase();
+    if (v === 'STRONG') score += 10;
+    else if (v === 'WEAK') score -= 20;
+    if (String(deep.correction_reason).toLowerCase() === 'cyclical') score += 3;   // recoverable dip
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 // GF-mode fundamental row for one stock. Nifty 100 are pre-vetted large caps,

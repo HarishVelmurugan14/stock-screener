@@ -189,12 +189,23 @@ async function loadOpportunities() {
 }
 
 function oppCard(o) {
-  const disc = (o.pe_discount_pct !== '' && o.pe_discount_pct !== null) ? Number(o.pe_discount_pct).toFixed(0) + '%' : '—';
-  const cheap = Number(o.pe_discount_pct) < 0 ? 'v pos' : '';
-  const offLabel = (o.avg_pe_5yr === '' || o.avg_pe_5yr === null) ? 'off high' : 'vs avg PE';
+  const d = o.deep;
+  const vdisc = d ? Number(d.valuation_discount_pct) : NaN;
+  let discTxt, discCls;
+  if (!isNaN(vdisc)) {                                    // Claude's sector-fair discount
+    discTxt = vdisc.toFixed(0) + '% below 5y ' + (d.valuation_metric || 'val');
+    discCls = vdisc > 0 ? 'v pos' : 'v neg';
+  } else {
+    const off = Number(o.pe_discount_pct);
+    discTxt = (isNaN(off) ? '—' : off.toFixed(0) + '%') + ' off high';
+    discCls = off < 0 ? 'v pos' : '';
+  }
   const mark = (o.shortlisted ? '★ ' : '') + (o.analyzed ? '🔬' : '⚠️');
   const conviction = fmt(o.final_score, 0);              // same number the Buy Plan ranks on
   const t = tierFor(o.final_score);
+  const cr = d ? String(d.correction_reason || '').toLowerCase() : '';
+  const crChip = cr === 'cyclical' ? '<span class="pill green">cyclical dip</span>'
+    : cr === 'unclear' ? '<span class="pill grey">cause unclear</span>' : '';
   const verdictChip = o.analyzed
     ? '<span class="pill ' + (VERDICT_PILL[o.verdict] || 'grey') + '">' + o.verdict + '</span>'
     : '<span class="pill grey">not analysed</span>';
@@ -205,16 +216,16 @@ function oppCard(o) {
       '<div class="price">' + rupee(o.current_price) + '</div></div>' +
       '<span class="pill pill-head">' + o.valuation_status.replace('_', ' ') + '</span></div>' +
     '<div class="body">' +
-      // Headline: grade tier + conviction number + verdict word.
+      // Headline: grade tier + conviction number + verdict + cyclical tag.
       '<div class="conv">' +
         '<span class="tier ' + t.cls + '" title="' + t.blurb + '">' + t.icon + ' ' + t.name + '</span>' +
         '<span class="conv-num">' + conviction + '<span class="conv-den">/100</span></span>' +
-        verdictChip +
+        verdictChip + crChip +
       '</div>' +
       '<div class="sub conv-lbl">Conviction · ' + t.blurb + '</div>' +
       // Compact stat line.
       '<div class="kpis"><span>PE ' + fmt(o.current_pe, 1) + 'x</span>' +
-        '<span class="' + cheap + '">' + disc + ' ' + offLabel + '</span>' +
+        '<span class="' + discCls + '">' + discTxt + '</span>' +
         '<span>R:R 1:' + fmt(o.risk_reward_ratio, 1) + '</span></div>' +
       // Targets.
       '<div class="targets">' +
@@ -235,67 +246,104 @@ function oppCard(o) {
 
 function detailBlock(o) {
   const d = o.deep;
-  let html = '';
-  if (d) {
-    const chk = v => (v !== '' && v !== null && !isNaN(Number(v))) ? (Number(v) >= 15 ? '✅' : Number(v) >= 10 ? '•' : '⚠️') : '';
-    const flags = (s, icon) => {
-      const a = (s || '').split('|').map(x => x.trim()).filter(Boolean);
-      return a.length ? '<div class="sub">' + icon + ' ' + a.join('<br>' + icon + ' ') + '</div>' : '';
-    };
-    html += '<div class="reason fund">' +
-      '<div class="sub mb-4"><b>Fundamentals</b> <span class="faint">— Claude estimate, verify before acting</span></div>' +
-      '<div class="kv"><span class="lbl">Rev CAGR 5y</span><span>' + fmt(d.revenue_cagr_5yr, 1) + '% ' + chk(d.revenue_cagr_5yr) + '</span></div>' +
-      '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>' + fmt(d.profit_cagr_5yr, 1) + '% ' + chk(d.profit_cagr_5yr) + '</span></div>' +
-      '<div class="kv"><span class="lbl">ROE 5y avg</span><span>' + fmt(d.roe_avg_5yr, 1) + '% ' + chk(d.roe_avg_5yr) + '</span></div>' +
-      '<div class="kv"><span class="lbl">Debt / Equity</span><span>' + fmt(d.debt_to_equity, 2) + ' (' + (d.debt_trend || '—') + ')</span></div>' +
-      '<div class="kv"><span class="lbl">Promoter</span><span>' + fmt(d.promoter_holding, 1) + '% (' + (d.promoter_trend || '—') + '), pledge ' + fmt(d.promoter_pledge, 1) + '%</span></div>' +
-      '<div class="kv"><span class="lbl">AI risk</span><span>' + (d.ai_disruption_risk || '—') + '</span></div>' +
-      (d.business_moat ? '<div class="sub mt-4">✅ Moat: ' + d.business_moat + '</div>' : '') +
-      flags(d.red_flags, '⚠️') + flags(d.green_flags, '✅') +
-      '<div class="sub mt-4">Claude confidence ' + fmt(d.confidence, 0) + '/100' +
-        (o.fundamentals_stale ? ' · <span class="pill amber">' + o.fundamentals_age_days + 'd old — re-analyse</span>' : '') + '</div>' +
-    '</div>';
-  } else {
-    html += '<div class="reason none">Not analysed yet — use “Copy Analysis Prompt” below (≈3 min via Claude) to add fundamentals.</div>';
+  if (!d) {
+    return '<div class="reason none">Not analysed yet — use “Copy Analysis Prompt” below (≈3 min via Claude) to add fundamentals.</div>' +
+      '<div class="reason risk"><b>RISK</b> ' + (o.risk_reason || '') + '</div>';
   }
-  html += '<div class="reason exit"><b>EXIT IF</b> ' + (o.exit_reason || '') + '</div>';
-  html += '<div class="reason risk"><b>RISK</b> ' + (o.risk_reason || '') + '</div>';
+  const risks = (d.key_risks || '').split('|').map(x => x.trim()).filter(Boolean);
+  const stale = o.fundamentals_stale ? ' · <span class="pill amber">' + o.fundamentals_age_days + 'd old</span>' : '';
+
+  let html = '<div class="reason fund">' +
+    '<div class="sub mb-4"><b>Analysis</b> <span class="faint">— Claude estimate, verify before acting</span></div>' +
+    // Valuation (sector-appropriate metric).
+    '<div class="kv"><span class="lbl">Valuation (' + (d.valuation_metric || '—') + ')</span><span>' +
+      fmt(d.current_valuation, 1) + ' vs 5y ' + fmt(d.historical_avg_valuation_5yr, 1) +
+      ' <span class="' + (Number(d.valuation_discount_pct) > 0 ? 'v pos' : 'v neg') + '">(' + fmt(d.valuation_discount_pct, 0) + '% ' + (d.valuation_verdict || '') + ')</span></span></div>' +
+    // Health + cause.
+    '<div class="kv"><span class="lbl">Business health</span><span>' + fmt(d.health_score, 0) + '/100 · ' + (d.correction_reason || '—') + '</span></div>' +
+    '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>' + fmt(d.profit_cagr_5yr, 1) + '%</span></div>' +
+    '<div class="kv"><span class="lbl">ROE (now / 5y)</span><span>' + fmt(d.roe_current, 1) + '% / ' + fmt(d.roe_5yr_avg, 1) + '%</span></div>' +
+    '<div class="kv"><span class="lbl">Cash flow / profit</span><span>' + fmt(d.operating_cf_to_net_profit, 2) + '</span></div>' +
+    '<div class="kv"><span class="lbl">Promoter</span><span>' + fmt(d.promoter_holding_pct, 1) + '% (' + (d.promoter_holding_trend || '—') + ')</span></div>' +
+    (d.mean_reversion_thesis ? '<div class="sub mt-4">📈 <b>Thesis:</b> ' + d.mean_reversion_thesis + '</div>' : '') +
+    (d.recovery_catalyst ? '<div class="sub">⚡ <b>Catalyst:</b> ' + d.recovery_catalyst + '</div>' : '') +
+    (risks.length ? '<div class="sub mt-4">⚠️ ' + risks.join('<br>⚠️ ') + '</div>' : '') +
+    (d.worst_case_scenario ? '<div class="sub">🩹 <b>Worst case:</b> ' + d.worst_case_scenario + (d.max_drawdown_risk_pct ? ' (~' + fmt(d.max_drawdown_risk_pct, 0) + '% downside)' : '') + '</div>' : '') +
+    '<div class="sub mt-4">Claude confidence ' + fmt(d.confidence, 0) + '/100' + stale +
+      (d.data_quality_flag ? ' · <span class="faint">' + d.data_quality_flag + '</span>' : '') + '</div>' +
+  '</div>';
+  // Fundamental exit = the analyst's thesis-invalidation fact (falls back to generic).
+  html += '<div class="reason exit"><b>EXIT IF</b> ' + (d.thesis_invalidation || o.exit_reason || '') + '</div>';
   return html;
 }
 
 // ── Fundamental analysis (human-in-the-loop) ────────────────────────────────
-function buildDeepPrompt(symbols) {
+// Sector-aware mean-reversion analyst prompt, batched over the shortlist. The
+// list (symbol · sector · price) is filled from the loaded opportunities; the
+// output is ONE JSON object keyed by symbol, each value following the schema.
+function buildDeepPrompt() {
+  const list = (_opps || []).map(o =>
+    '- ' + o.symbol + '  ·  ' + (o.sector || '?') + '  ·  ₹' + (o.current_price || '?')).join('\n');
+  const today = new Date().toISOString().slice(0, 10);
   return [
-    'You are a fundamental analyst for Indian large-cap (NSE) stocks.',
-    'Analyse these stocks and return ONLY a single JSON object — no prose, no markdown, no backticks.',
-    'If you add ANY text outside the JSON, the tool fails to parse it.',
-    '',
-    'Stocks: ' + symbols.join(', '),
-    '',
-    'For EACH stock return these keys:',
-    'revenue_cagr_3yr, revenue_cagr_5yr, profit_cagr_3yr, profit_cagr_5yr (numbers, %),',
-    'roe_latest, roe_avg_3yr, roe_avg_5yr, roce_latest (numbers, %),',
-    'debt_to_equity (number), debt_trend (INCREASING|DECREASING|STABLE|ZERO),',
-    'cf_quality (Operating CF / Net Profit, number),',
-    'promoter_holding, promoter_pledge (numbers, %), promoter_trend (INCREASING|DECREASING|STABLE),',
-    'red_flags (array of strings), green_flags (array of strings),',
-    'business_moat (one line), ai_disruption_risk (\'HIGH|MEDIUM|LOW — reason\'),',
-    'verdict (STRONG|MODERATE|WEAK|AVOID), confidence (0-100), analysis_date (YYYY-MM-DD).',
-    '',
-    'Be conservative. If unsure of a number, give your best estimate AND add to red_flags: \'Data unverified — manual check recommended\'.',
-    '',
-    'Shape (keys are the stock symbols):',
-    '{ "' + (symbols[0] || 'SYM') + '": { "revenue_cagr_5yr": 11.4, "profit_cagr_5yr": 13.8, "roe_avg_5yr": 41.8, ' +
-      '"debt_to_equity": 0.0, "debt_trend": "ZERO", "cf_quality": 0.94, "promoter_holding": 72.3, "promoter_pledge": 0.0, ' +
-      '"promoter_trend": "STABLE", "red_flags": [], "green_flags": ["Zero debt"], "business_moat": "...", ' +
-      '"ai_disruption_risk": "MEDIUM — ...", "verdict": "STRONG", "confidence": 88, "analysis_date": "' +
-      new Date().toISOString().slice(0, 10) + '" } }',
+'You are a strict, conservative fundamental analyst screening Indian equities for a',
+'retail investor using a mean-reversion strategy: buy QUALITY businesses trading below',
+'their OWN historical valuation, where the cheapness is CYCLICAL (recoverable) — not',
+'STRUCTURAL (permanent). Your job is honest opportunity assessment, NOT optimism.',
+'If data is unreliable, say so and lower confidence. Never manufacture certainty.',
+'',
+'Analyse EACH of these NSE stocks (today = ' + today + '):',
+list,
+'',
+'VALUATION METRIC RULE — pick the metric appropriate to the sector:',
+'- IT / FMCG / Consumer / Pharma / Auto / Industrials / Chemicals → "PE" (PEG secondary)',
+'- Banks / NBFC / Insurance                                       → "PB" (ROA/ROE context; D/E N/A)',
+'- Energy / Metals / Cement / Commodities / heavy cyclicals       → "EV_EBITDA" (PB secondary)',
+'valuation_discount_pct = ((historical_avg_5yr - current) / historical_avg_5yr) * 100.',
+'Positive = cheaper than its own 5-yr norm. SAME comparable number across all sectors.',
+'',
+'BUSINESS HEALTH GATE — business_healthy = TRUE only if ALL hold: profit not in sustained',
+'3-yr decline; ROE within ~30% of its 5-yr average; operating_cf_to_net_profit > ~0.8;',
+'no debt explosion (N/A for banks). If any fail, business_healthy = FALSE.',
+'',
+'FALLING-KNIFE FILTER — correction_reason: "cyclical" (market/sector/macro/one weak quarter —',
+'RECOVERABLE) | "structural" (disruption, sustained margin erosion, governance/promoter exit,',
+'secular decline — AVOID) | "unclear" (cannot confidently tell — choose this, do NOT guess).',
+'',
+'Return ONLY a valid JSON object whose KEYS are the symbols — no prose, no markdown, no',
+'backticks. Do NOT include the // comments in your output.',
+'',
+'{ "SYMBOL": {',
+'  "symbol":"", "sector":"", "analysis_date":"",',
+'  "valuation_metric":"",            // "PE" | "PB" | "EV_EBITDA"',
+'  "current_valuation":0, "historical_avg_valuation_5yr":0,',
+'  "valuation_discount_pct":0,       // positive = cheap vs own history',
+'  "valuation_verdict":"",           // "CHEAP" | "FAIR" | "EXPENSIVE"',
+'  "revenue_cagr_3yr":0, "revenue_cagr_5yr":0, "profit_cagr_3yr":0, "profit_cagr_5yr":0,',
+'  "roe_current":0, "roe_5yr_avg":0, "roce_current":0, "debt_to_equity":0,   // roce/de null for banks',
+'  "operating_cf_to_net_profit":0, "promoter_holding_pct":0, "promoter_holding_trend":"",',
+'  "business_healthy":true, "health_score":0,        // 0-100',
+'  "sector_specific_metrics":{},     // banks: nim,gnpa,nnpa,casa,roa; IT: ebit_margin,attrition,deal_tcv_trend',
+'  "correction_reason":"", "correction_reasoning":"", "is_value_trap_risk":true,',
+'  "mean_reversion_thesis":"", "recovery_catalyst":"", "thesis_invalidation":"",',
+'  "key_risks":[], "worst_case_scenario":"", "max_drawdown_risk_pct":0,',
+'  "verdict":"", "confidence":0, "data_quality_flag":"" } }',
+'',
+'VERDICT RULES (in order — AVOID overrides all):',
+'- AVOID: business_healthy=FALSE OR correction_reason="structural" OR is_value_trap_risk=TRUE',
+'- STRONG: valuation_discount_pct>20 AND business_healthy=TRUE AND correction_reason="cyclical"',
+'- MODERATE: discount 10-20 OR correction_reason="unclear" (with business_healthy=TRUE)',
+'- WEAK: business_healthy=TRUE but discount<10 (good company, not cheap enough)',
+'',
+'CONSERVATISM: don\'t infer a trend from one year; if no reliable 5-yr history, confidence<50',
+'and flag it in data_quality_flag; when torn cyclical vs structural choose "unclear"; state the',
+'metric basis; round sensibly.',
   ].join('\n');
 }
 
 async function copyDeepPrompt() {
   if (!_oppSymbols.length) { toast('No opportunities to analyse', false); return; }
-  const text = buildDeepPrompt(_oppSymbols);
+  const text = buildDeepPrompt();
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);

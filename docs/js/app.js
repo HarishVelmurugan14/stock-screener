@@ -414,8 +414,9 @@ async function saveDeep() {
 
 // ── Buy plan ────────────────────────────────────────────────────────────────
 // Score-weighted, whole-share allocation across the shortlist within available
-// capital. Tranches in a weak market (deploy ~60%, keep dry powder), caps any
-// single name at 40% (when >=3 names), then tops up leftover by conviction.
+// capital. Tranches in a weak market (deploy ~60%, keep dry powder). NO per-name
+// cap — with small capital you back conviction, so the best-graded names get the
+// biggest slice; leftover tops up the highest-conviction affordable name.
 function buildBuyPlan(capital) {
   const caution = _health && _health.isAbove200DMA === false;
   const deployFrac = caution ? 0.6 : 1.0;
@@ -433,26 +434,23 @@ function buildBuyPlan(capital) {
       note: 'No buy-worthy names within budget right now — holding cash is fine.' };
   }
 
-  const n = eligible.length;
-  const maxW = n >= 3 ? 0.40 : 0.60;                       // per-name concentration cap
-  const cap = Math.floor(deployable * maxW);
   const totalScore = eligible.reduce((a, o) => a + (Number(o.final_score) || Number(o.confidence_score) || 1), 0);
 
-  // Base whole-share allocation, weighted by score, clamped to the cap.
+  // Base whole-share allocation, weighted purely by conviction (no cap).
   const plan = eligible.map(o => {
     const score = Number(o.final_score) || Number(o.confidence_score) || 1;
     const price = Number(o.current_price);
-    const target = Math.min(deployable * (score / totalScore), cap);
+    const target = deployable * (score / totalScore);
     return { o, price, score, shares: Math.floor(target / price) };
   });
 
-  // Greedy top-up: spend leftover on the highest-score name that still fits.
+  // Greedy top-up: spend leftover on the highest-conviction name that still fits.
   let spent = plan.reduce((a, p) => a + p.shares * p.price, 0);
   let leftover = deployable - spent;
   let added = true;
   while (added) {
     added = false;
-    const cands = plan.filter(p => p.price <= leftover && (p.shares + 1) * p.price <= cap);
+    const cands = plan.filter(p => p.price <= leftover);
     if (cands.length) {
       cands.sort((a, b) => b.score - a.score);
       cands[0].shares += 1;

@@ -353,8 +353,10 @@ function getOrCreateTab_(name) {
 }
 
 // Rewrite row 1 to the canonical HEADERS if it has drifted (schema evolution).
-// Data rows are preserved; new columns appear blank for old rows.
-function ensureHeaders_(name) {
+// wipeData=true (re-derivable tabs like the deep analysis): when the header
+// actually changes, also clear existing data rows so old-layout values can't sit
+// misaligned under the new columns — they repopulate on the next analysis paste.
+function ensureHeaders_(name, wipeData) {
   const sh = ss_().getSheetByName(name);
   if (!sh || !HEADERS[name]) return;
   const want = HEADERS[name];
@@ -362,11 +364,14 @@ function ensureHeaders_(name) {
   const cur = sh.getRange(1, 1, 1, width).getValues()[0];
   let diff = cur.length < want.length;
   for (let i = 0; i < want.length && !diff; i++) if (String(cur[i] || '') !== want[i]) diff = true;
-  if (diff) {
-    sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold');
-    sh.setFrozenRows(1);
-    log_('ensureHeaders_ updated header row for ' + name);
+  if (!diff) return;
+  if (wipeData) {
+    const last = sh.getLastRow();
+    if (last > 1) sh.getRange(2, 1, last - 1, sh.getLastColumn()).clearContent();
   }
+  sh.getRange(1, 1, 1, want.length).setValues([want]).setFontWeight('bold');
+  sh.setFrozenRows(1);
+  log_('ensureHeaders_ updated header for ' + name + (wipeData ? ' (stale rows cleared)' : ''));
 }
 
 // Read a StockIQ tab as array-of-objects keyed by header.
@@ -491,7 +496,7 @@ function setupStockIQ() {
   [TAB_CONFIG, TAB_FUNDAMENTALS, TAB_OPPORTUNITIES, TAB_PORTFOLIO, TAB_ALERTS, TAB_DEEP].forEach(function (name) {
     const existed = !!ss_().getSheetByName(name);
     getOrCreateTab_(name);
-    ensureHeaders_(name);                    // reconcile columns if the schema grew
+    ensureHeaders_(name, name === TAB_DEEP); // reconcile columns; deep tab self-clears on schema change
     (existed ? summary.tabsExisting : summary.tabsCreated).push(name);
   });
   // Hidden GOOGLEFINANCE scratch tab (formula round-trips).
@@ -1889,7 +1894,7 @@ function saveDeepAnalysis(data) {
   if (!symbols.length) throw new Error('saveDeepAnalysis: no stock objects found in JSON');
 
   getOrCreateTab_(TAB_DEEP);
-  ensureHeaders_(TAB_DEEP);                    // pick up schema additions without a manual setup
+  ensureHeaders_(TAB_DEEP, true);              // schema additions + auto-clear any stale-layout rows
   const saved = [];
   symbols.forEach(function (sym) {
     const a = analysis[sym] || {};
@@ -2304,4 +2309,16 @@ function TEST_setApiToken(token) {
   const props = PropertiesService.getScriptProperties();
   if (token) { props.setProperty('api_token', String(token).trim()); log_('api_token set'); return { set: true }; }
   props.deleteProperty('api_token'); log_('api_token cleared'); return { set: false };
+}
+
+// Wipe all deep-analysis rows (header kept) for a clean slate. Safe — the data
+// is re-derivable by re-pasting the Claude analysis. Run from the editor.
+function TEST_clearDeep() {
+  const sh = ss_().getSheetByName(TAB_DEEP);
+  if (!sh) return { cleared: 0 };
+  const last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, sh.getLastColumn()).clearContent();
+  const n = Math.max(0, last - 1);
+  log_('TEST_clearDeep: cleared ' + n + ' rows');
+  return { cleared: n };
 }

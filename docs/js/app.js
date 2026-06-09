@@ -252,19 +252,25 @@ function detailBlock(o) {
   }
   const risks = (d.key_risks || '').split('|').map(x => x.trim()).filter(Boolean);
   const stale = o.fundamentals_stale ? ' · <span class="pill amber">' + o.fundamentals_age_days + 'd old</span>' : '';
+  const justified = (d.peg_or_growth_justifies_valuation === true || String(d.peg_or_growth_justifies_valuation).toUpperCase() === 'TRUE');
 
   let html = '<div class="reason fund">' +
     '<div class="sub mb-4"><b>Analysis</b> <span class="faint">— Claude estimate, verify before acting</span></div>' +
-    // Valuation (sector-appropriate metric).
+    // Valuation (sector-appropriate metric) + fair-value upside.
     '<div class="kv"><span class="lbl">Valuation (' + (d.valuation_metric || '—') + ')</span><span>' +
       fmt(d.current_valuation, 1) + ' vs 5y ' + fmt(d.historical_avg_valuation_5yr, 1) +
-      ' <span class="' + (Number(d.valuation_discount_pct) > 0 ? 'v pos' : 'v neg') + '">(' + fmt(d.valuation_discount_pct, 0) + '% ' + (d.valuation_verdict || '') + ')</span></span></div>' +
+      ' <span class="' + (Number(d.valuation_discount_pct) > 0 ? 'v pos' : 'v neg') + '">(' + fmt(d.valuation_discount_pct, 0) + '% below)</span></span></div>' +
+    '<div class="kv"><span class="lbl">Upside to fair value</span><span class="v pos">+' + fmt(d.fair_value_upside_pct, 0) + '%</span></div>' +
+    '<div class="kv"><span class="lbl">Premium earned?</span><span>' + (justified ? '✅ growth justifies it' : '⚠️ not clearly') + '</span></div>' +
     // Health + cause.
     '<div class="kv"><span class="lbl">Business health</span><span>' + fmt(d.health_score, 0) + '/100 · ' + (d.correction_reason || '—') + '</span></div>' +
-    '<div class="kv"><span class="lbl">Profit CAGR 5y</span><span>' + fmt(d.profit_cagr_5yr, 1) + '%</span></div>' +
+    '<div class="kv"><span class="lbl">Profit CAGR 3y</span><span>' + fmt(d.profit_cagr_3yr, 1) + '%</span></div>' +
     '<div class="kv"><span class="lbl">ROE (now / 5y)</span><span>' + fmt(d.roe_current, 1) + '% / ' + fmt(d.roe_5yr_avg, 1) + '%</span></div>' +
     '<div class="kv"><span class="lbl">Cash flow / profit</span><span>' + fmt(d.operating_cf_to_net_profit, 2) + '</span></div>' +
     '<div class="kv"><span class="lbl">Promoter</span><span>' + fmt(d.promoter_holding_pct, 1) + '% (' + (d.promoter_holding_trend || '—') + ')</span></div>' +
+    // Scaled exits (the per-stock plan).
+    '<div class="kv"><span class="lbl">Scaled exits</span><span>T1 +' + fmt(d.suggested_exit_t1_pct, 0) + '% · T2 +' + fmt(d.suggested_exit_t2_pct, 0) + '% · stop -' + fmt(d.suggested_stop_pct, 0) + '%</span></div>' +
+    '<div class="kv"><span class="lbl">Valuation floor</span><span>' + fmt(d.valuation_floor, 1) + ' (-' + fmt(d.floor_downside_pct, 0) + '% downside)</span></div>' +
     (d.mean_reversion_thesis ? '<div class="sub mt-4">📈 <b>Thesis:</b> ' + d.mean_reversion_thesis + '</div>' : '') +
     (d.recovery_catalyst ? '<div class="sub">⚡ <b>Catalyst:</b> ' + d.recovery_catalyst + '</div>' : '') +
     (risks.length ? '<div class="sub mt-4">⚠️ ' + risks.join('<br>⚠️ ') + '</div>' : '') +
@@ -286,58 +292,63 @@ function buildDeepPrompt() {
     '- ' + o.symbol + '  ·  ' + (o.sector || '?') + '  ·  ₹' + (o.current_price || '?')).join('\n');
   const today = new Date().toISOString().slice(0, 10);
   return [
-'You are a strict, conservative fundamental analyst screening Indian equities for a',
-'retail investor using a mean-reversion strategy: buy QUALITY businesses trading below',
-'their OWN historical valuation, where the cheapness is CYCLICAL (recoverable) — not',
-'STRUCTURAL (permanent). Your job is honest opportunity assessment, NOT optimism.',
-'If data is unreliable, say so and lower confidence. Never manufacture certainty.',
+'You are a strict, conservative fundamental analyst screening Indian equities for a retail',
+'investor running a MEAN-REVERSION strategy: buy QUALITY businesses trading below their OWN',
+'fair historical valuation, where the cheapness is CYCLICAL (recoverable) — NOT structural,',
+'and NOT a deflating hype premium.',
+'',
+'You are a GATEKEEPER, not a cheerleader. Most stocks should NOT clear the bar on any given',
+'day. "WAIT / no opportunity" is a correct, expected outcome. Never manufacture an opportunity.',
+'If data is unreliable, say so and lower confidence.',
 '',
 'Analyse EACH of these NSE stocks (today = ' + today + '):',
 list,
 '',
-'VALUATION METRIC RULE — pick the metric appropriate to the sector:',
-'- IT / FMCG / Consumer / Pharma / Auto / Industrials / Chemicals → "PE" (PEG secondary)',
-'- Banks / NBFC / Insurance                                       → "PB" (ROA/ROE context; D/E N/A)',
-'- Energy / Metals / Cement / Commodities / heavy cyclicals       → "EV_EBITDA" (PB secondary)',
-'valuation_discount_pct = ((historical_avg_5yr - current) / historical_avg_5yr) * 100.',
-'Positive = cheaper than its own 5-yr norm. SAME comparable number across all sectors.',
+'STEP 1 — pick the valuation metric by sector: IT/FMCG/Consumer/Pharma/Auto/Industrials/',
+'Chemicals → "PE" (PEG secondary) | Banks/NBFC/Insurance → "PB" (ROA/ROE context; D/E N/A) |',
+'Energy/Metals/Cement/Commodities → "EV_EBITDA" (PB secondary).',
+'STEP 2 — valuation_discount_pct = ((historical_avg_5yr - current) / historical_avg_5yr)*100. Positive = cheaper than own 5-yr norm.',
+'STEP 3 — HYPE GATE (critical): "cheap vs own history" is real ONLY if that history was JUSTIFIED.',
+'  A merely over-hyped stock falling toward fair value is a DEFLATING BALLOON, not a stretched spring.',
+'  Check PEG (~<1.5 sane; high PE OK only if profits truly grow to match), real profit & cash, and',
+'  whether the historical premium was EARNED. If the historical avg itself was an unjustified hype',
+'  premium → is_deflating_hype = TRUE and verdict = AVOID, no matter how "cheap" it looks.',
+'STEP 4 — BUSINESS HEALTH GATE: business_healthy = TRUE only if ALL: profit not in sustained 3-yr',
+'  decline; ROE within ~30% of 5-yr avg; operating_cf_to_net_profit > ~0.8; no debt explosion (N/A banks).',
+'STEP 5 — FALLING-KNIFE: correction_reason = "cyclical" (market/sector/macro/one weak quarter) |',
+'  "structural" (disruption, sustained margin erosion, governance/promoter exit) | "unclear" (do NOT guess).',
+'STEP 6 — SCALED exits/stop (NEVER flat numbers):',
+'  fair_value_upside_pct = ((historical_avg_5yr - current) / current)*100',
+'  suggested_exit_t1_pct = round(0.60 * fair_value_upside_pct)   // book ~50% here',
+'  suggested_exit_t2_pct = round(1.00 * fair_value_upside_pct)   // book rest near fair value',
+'  valuation_floor = realistic worst-case PE/PB; floor_downside_pct = % below current to that floor;',
+'  suggested_stop_pct = just below floor_downside_pct (tight if near floor, wide if floor is deep).',
 '',
-'BUSINESS HEALTH GATE — business_healthy = TRUE only if ALL hold: profit not in sustained',
-'3-yr decline; ROE within ~30% of its 5-yr average; operating_cf_to_net_profit > ~0.8;',
-'no debt explosion (N/A for banks). If any fail, business_healthy = FALSE.',
-'',
-'FALLING-KNIFE FILTER — correction_reason: "cyclical" (market/sector/macro/one weak quarter —',
-'RECOVERABLE) | "structural" (disruption, sustained margin erosion, governance/promoter exit,',
-'secular decline — AVOID) | "unclear" (cannot confidently tell — choose this, do NOT guess).',
-'',
-'Return ONLY a valid JSON object whose KEYS are the symbols — no prose, no markdown, no',
-'backticks. Do NOT include the // comments in your output.',
+'Return ONLY a valid JSON object whose KEYS are the symbols — no prose, no markdown, no backticks.',
+'Do NOT output the // comments.',
 '',
 '{ "SYMBOL": {',
 '  "symbol":"", "sector":"", "analysis_date":"",',
-'  "valuation_metric":"",            // "PE" | "PB" | "EV_EBITDA"',
-'  "current_valuation":0, "historical_avg_valuation_5yr":0,',
-'  "valuation_discount_pct":0,       // positive = cheap vs own history',
-'  "valuation_verdict":"",           // "CHEAP" | "FAIR" | "EXPENSIVE"',
-'  "revenue_cagr_3yr":0, "revenue_cagr_5yr":0, "profit_cagr_3yr":0, "profit_cagr_5yr":0,',
-'  "roe_current":0, "roe_5yr_avg":0, "roce_current":0, "debt_to_equity":0,   // roce/de null for banks',
-'  "operating_cf_to_net_profit":0, "promoter_holding_pct":0, "promoter_holding_trend":"",',
-'  "business_healthy":true, "health_score":0,        // 0-100',
-'  "sector_specific_metrics":{},     // banks: nim,gnpa,nnpa,casa,roa; IT: ebit_margin,attrition,deal_tcv_trend',
-'  "correction_reason":"", "correction_reasoning":"", "is_value_trap_risk":true,',
+'  "valuation_metric":"", "current_valuation":0, "historical_avg_valuation_5yr":0,',
+'  "valuation_discount_pct":0, "fair_value_upside_pct":0,',
+'  "is_deflating_hype":false, "hype_check_reasoning":"", "peg_or_growth_justifies_valuation":false,',
+'  "revenue_cagr_3yr":0, "profit_cagr_3yr":0, "roe_current":0, "roe_5yr_avg":0,',
+'  "debt_to_equity":0, "operating_cf_to_net_profit":0, "promoter_holding_pct":0, "promoter_holding_trend":"",',
+'  "business_healthy":true, "health_score":0, "sector_specific_metrics":{},',
+'  "correction_reason":"", "correction_reasoning":"", "is_value_trap_risk":false,',
+'  "suggested_exit_t1_pct":0, "suggested_exit_t2_pct":0, "valuation_floor":0, "floor_downside_pct":0, "suggested_stop_pct":0,',
 '  "mean_reversion_thesis":"", "recovery_catalyst":"", "thesis_invalidation":"",',
 '  "key_risks":[], "worst_case_scenario":"", "max_drawdown_risk_pct":0,',
 '  "verdict":"", "confidence":0, "data_quality_flag":"" } }',
 '',
 'VERDICT RULES (in order — AVOID overrides all):',
-'- AVOID: business_healthy=FALSE OR correction_reason="structural" OR is_value_trap_risk=TRUE',
-'- STRONG: valuation_discount_pct>20 AND business_healthy=TRUE AND correction_reason="cyclical"',
-'- MODERATE: discount 10-20 OR correction_reason="unclear" (with business_healthy=TRUE)',
-'- WEAK: business_healthy=TRUE but discount<10 (good company, not cheap enough)',
+'- AVOID: is_deflating_hype=TRUE OR business_healthy=FALSE OR correction_reason="structural" OR is_value_trap_risk=TRUE',
+'- STRONG: discount>20 AND business_healthy=TRUE AND correction_reason="cyclical" AND is_deflating_hype=FALSE',
+'- MODERATE: discount 10-20 (healthy, not hype) OR correction_reason="unclear" with business_healthy=TRUE',
+'- WEAK: business_healthy=TRUE but discount<10 (good company, not cheap enough — WAIT)',
 '',
-'CONSERVATISM: don\'t infer a trend from one year; if no reliable 5-yr history, confidence<50',
-'and flag it in data_quality_flag; when torn cyclical vs structural choose "unclear"; state the',
-'metric basis; round sensibly.',
+'CONSERVATISM: never infer a trend from one year; if no reliable 5-yr history, confidence<50 and',
+'flag it; when torn cyclical vs structural, choose "unclear" — never default to optimism.',
   ].join('\n');
 }
 

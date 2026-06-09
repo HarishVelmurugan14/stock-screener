@@ -74,12 +74,14 @@ HEADERS[TAB_ALERTS]        = [
 // mean-reversion schema). LLM ESTIMATES — surfaced as such, never treated as verified.
 HEADERS[TAB_DEEP]          = [
   'symbol', 'sector', 'analysis_date',
-  'valuation_metric', 'current_valuation', 'historical_avg_valuation_5yr', 'valuation_discount_pct', 'valuation_verdict',
-  'revenue_cagr_3yr', 'revenue_cagr_5yr', 'profit_cagr_3yr', 'profit_cagr_5yr',
-  'roe_current', 'roe_5yr_avg', 'roce_current', 'debt_to_equity', 'operating_cf_to_net_profit',
+  'valuation_metric', 'current_valuation', 'historical_avg_valuation_5yr', 'valuation_discount_pct', 'fair_value_upside_pct',
+  'is_deflating_hype', 'hype_check_reasoning', 'peg_or_growth_justifies_valuation',
+  'revenue_cagr_3yr', 'profit_cagr_3yr',
+  'roe_current', 'roe_5yr_avg', 'debt_to_equity', 'operating_cf_to_net_profit',
   'promoter_holding_pct', 'promoter_holding_trend',
   'business_healthy', 'health_score', 'sector_specific_metrics',
   'correction_reason', 'correction_reasoning', 'is_value_trap_risk',
+  'suggested_exit_t1_pct', 'suggested_exit_t2_pct', 'valuation_floor', 'floor_downside_pct', 'suggested_stop_pct',
   'mean_reversion_thesis', 'recovery_catalyst', 'thesis_invalidation',
   'key_risks', 'worst_case_scenario', 'max_drawdown_risk_pct',
   'verdict', 'confidence', 'data_quality_flag', 'source', 'last_updated'
@@ -1333,23 +1335,25 @@ function runEndOfDayAlerts() {
 
     const t1Hit = String(p.target_1_hit).toUpperCase() === 'TRUE';
     const t2Hit = String(p.target_2_hit).toUpperCase() === 'TRUE';
+    // Fire against this position's own stored prices (per-stock scaled levels),
+    // not a flat % — so each position exits at the level set when it was added.
+    const t1 = toNum_(p.target_1_price), t2 = toNum_(p.target_2_price), sl = toNum_(p.stop_loss_price);
 
-    // Stop loss (highest priority).
-    if (pnlPct !== null && pnlPct <= -cfg.stop_loss_pct) {
+    if (sl !== null && cur <= sl) {
       alerts.push(writeAlert_({ symbol: p.symbol, alert_type: ALERT.STOP_LOSS_HIT,
-        message: p.symbol + ' hit stop loss: ' + round2_(pnlPct) + '% (≤ -' + cfg.stop_loss_pct + '%).',
-        action_required: 'EXIT NOW — review thesis', current_price: cur, trigger_price: toNum_(p.stop_loss_price) }));
+        message: p.symbol + ' hit stop loss: ₹' + round2_(cur) + ' (≤ ₹' + sl + ', ' + round2_(pnlPct) + '%).',
+        action_required: 'EXIT NOW — review thesis', current_price: cur, trigger_price: sl }));
       status = 'EXIT_NOW';
-    } else if (pnlPct !== null && pnlPct >= cfg.target_2_pct && !t2Hit) {
+    } else if (t2 !== null && cur >= t2 && !t2Hit) {
       alerts.push(writeAlert_({ symbol: p.symbol, alert_type: ALERT.TARGET_2_HIT,
-        message: p.symbol + ' reached Target 2: +' + round2_(pnlPct) + '%.',
-        action_required: 'Book remaining / trail', current_price: cur, trigger_price: toNum_(p.target_2_price) }));
+        message: p.symbol + ' reached Target 2: ₹' + round2_(cur) + ' (+' + round2_(pnlPct) + '%).',
+        action_required: 'Book remaining / trail', current_price: cur, trigger_price: t2 }));
       setPortfolioFlag_(p.__row, 'target_2_hit', true);
       status = 'BOOK_PROFIT';
-    } else if (pnlPct !== null && pnlPct >= cfg.target_1_pct && !t1Hit) {
+    } else if (t1 !== null && cur >= t1 && !t1Hit) {
       alerts.push(writeAlert_({ symbol: p.symbol, alert_type: ALERT.TARGET_1_HIT,
-        message: p.symbol + ' reached Target 1: +' + round2_(pnlPct) + '%.',
-        action_required: 'Book 50%', current_price: cur, trigger_price: toNum_(p.target_1_price) }));
+        message: p.symbol + ' reached Target 1: ₹' + round2_(cur) + ' (+' + round2_(pnlPct) + '%).',
+        action_required: 'Book 50%', current_price: cur, trigger_price: t1 }));
       setPortfolioFlag_(p.__row, 'target_1_hit', true);
       status = 'BOOK_PROFIT';
     }
@@ -1497,8 +1501,19 @@ function addPosition(data) {
   if (!opp) warnings.push('Not currently in the top opportunities list');
   else if (['BUY', 'STRONG_BUY'].indexOf(opp.valuation_status) < 0) warnings.push('Not in buy zone (status ' + opp.valuation_status + ')');
 
-  // Build position row.
+  // Build position row. Prefer the analyst's per-stock SCALED exits/stop; fall
+  // back to the flat config targets only when no analysis exists for this name.
   const tg = calculateTargets(entryPrice, cfg);
+  const dp = getDeepAnalysis().bySymbol[String(data.symbol).toUpperCase()] || null;
+  let t1Price = tg.target1Price, t2Price = tg.target2Price, slPrice = tg.stopLossPrice;
+  if (dp) {
+    const t1 = toNum_(dp.suggested_exit_t1_pct), t2 = toNum_(dp.suggested_exit_t2_pct), sl = toNum_(dp.suggested_stop_pct);
+    if (t1 !== null && t2 !== null && sl !== null && sl > 0) {
+      t1Price = round2_(entryPrice * (1 + t1 / 100));
+      t2Price = round2_(entryPrice * (1 + t2 / 100));
+      slPrice = round2_(entryPrice * (1 - sl / 100));
+    }
+  }
   const entryPE = opp ? toNum_(opp.current_pe) : currentPEForSymbol_(data.symbol);
   const notes = (data.notes ? data.notes + ' | ' : '') + (entryPE !== null ? 'entryPE=' + entryPE : '');
   const id = 'POS-' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMddHHmmss') + '-' + data.symbol;
@@ -1507,9 +1522,9 @@ function addPosition(data) {
     id: id, symbol: data.symbol, company_name: meta.name, entry_date: fmtDate_(new Date()),
     entry_price: entryPrice, quantity: qty, invested_amount: invested,
     current_price: entryPrice, current_value: invested, unrealised_pnl: 0, unrealised_pnl_pct: 0,
-    target_1_price: tg.target1Price, target_1_hit: false,
-    target_2_price: tg.target2Price, target_2_hit: false,
-    stop_loss_price: tg.stopLossPrice, alert_status: 'HOLD',
+    target_1_price: t1Price, target_1_hit: false,
+    target_2_price: t2Price, target_2_hit: false,
+    stop_loss_price: slPrice, alert_status: 'HOLD',
     days_held: 0, annualised_return: 0,
     paper_trade: cfg.paper_trade_mode === true, notes: notes, last_updated: fmtDateTime_(new Date())
   };
@@ -1782,9 +1797,9 @@ function getOpportunityData() {
   rows.forEach(function (o) {
     const deep = deepMap[o.symbol] || null;
     const verdict = deep ? String(deep.verdict).toUpperCase() : '';
-    // Hard block: explicit AVOID, a flagged value trap, a structural (permanent)
-    // decline, or a failed business-health gate — never surface these as buys.
-    if (deep && (verdict === 'AVOID' || isTrue_(deep.is_value_trap_risk) ||
+    // Hard block: AVOID, a deflating hype premium, a value trap, a structural
+    // (permanent) decline, or a failed business-health gate — never shown as buys.
+    if (deep && (verdict === 'AVOID' || isTrue_(deep.is_deflating_hype) || isTrue_(deep.is_value_trap_risk) ||
         String(deep.correction_reason).toLowerCase() === 'structural' ||
         (deep.business_healthy !== undefined && deep.business_healthy !== '' && !isTrue_(deep.business_healthy)))) {
       return;
@@ -1798,6 +1813,18 @@ function getOpportunityData() {
       if (verdict === 'WEAK') {
         o.valuation_status = 'WATCH';                       // value-trap guard: not a "BUY"
         o.weak = true;
+      }
+      // Per-stock SCALED exits/stop from the analyst (override the flat defaults).
+      const t1 = toNum_(deep.suggested_exit_t1_pct);
+      const t2 = toNum_(deep.suggested_exit_t2_pct);
+      const sl = toNum_(deep.suggested_stop_pct);
+      const px = toNum_(o.current_price);
+      if (px && t1 !== null && t2 !== null && sl !== null && sl > 0) {
+        o.target_1_price = round2_(px * (1 + t1 / 100)); o.target_1_upside_pct = t1;
+        o.target_2_price = round2_(px * (1 + t2 / 100)); o.target_2_upside_pct = t2;
+        o.stop_loss_price = round2_(px * (1 - sl / 100)); o.stop_loss_pct = sl;
+        o.risk_reward_ratio = round2_(t1 / sl);            // scaled R:R (no longer constant)
+        o.scaled_exits = true;
       }
       if (deep.analysis_date) {
         const d = new Date(deep.analysis_date);
@@ -1899,6 +1926,7 @@ function saveDeepAnalysis(data) {
   symbols.forEach(function (sym) {
     const a = analysis[sym] || {};
     const ssm = a.sector_specific_metrics;
+    const bool_ = function (v) { return v === true || String(v).toUpperCase() === 'TRUE'; };
     const row = {
       symbol: String(sym).toUpperCase(),
       sector: a.sector || '',
@@ -1907,18 +1935,21 @@ function saveDeepAnalysis(data) {
       current_valuation: toNum_(a.current_valuation),
       historical_avg_valuation_5yr: toNum_(a.historical_avg_valuation_5yr),
       valuation_discount_pct: toNum_(a.valuation_discount_pct),
-      valuation_verdict: a.valuation_verdict || '',
-      revenue_cagr_3yr: toNum_(a.revenue_cagr_3yr), revenue_cagr_5yr: toNum_(a.revenue_cagr_5yr),
-      profit_cagr_3yr: toNum_(a.profit_cagr_3yr),   profit_cagr_5yr: toNum_(a.profit_cagr_5yr),
+      fair_value_upside_pct: toNum_(a.fair_value_upside_pct),
+      is_deflating_hype: bool_(a.is_deflating_hype),
+      hype_check_reasoning: a.hype_check_reasoning || '',
+      peg_or_growth_justifies_valuation: bool_(a.peg_or_growth_justifies_valuation),
+      revenue_cagr_3yr: toNum_(a.revenue_cagr_3yr), profit_cagr_3yr: toNum_(a.profit_cagr_3yr),
       roe_current: toNum_(a.roe_current), roe_5yr_avg: toNum_(a.roe_5yr_avg),
-      roce_current: toNum_(a.roce_current), debt_to_equity: toNum_(a.debt_to_equity),
-      operating_cf_to_net_profit: toNum_(a.operating_cf_to_net_profit),
+      debt_to_equity: toNum_(a.debt_to_equity), operating_cf_to_net_profit: toNum_(a.operating_cf_to_net_profit),
       promoter_holding_pct: toNum_(a.promoter_holding_pct), promoter_holding_trend: a.promoter_holding_trend || '',
-      business_healthy: (a.business_healthy === true || String(a.business_healthy).toUpperCase() === 'TRUE'),
-      health_score: toNum_(a.health_score),
+      business_healthy: bool_(a.business_healthy), health_score: toNum_(a.health_score),
       sector_specific_metrics: (ssm && typeof ssm === 'object') ? JSON.stringify(ssm) : (ssm || ''),
       correction_reason: a.correction_reason || '', correction_reasoning: a.correction_reasoning || '',
-      is_value_trap_risk: (a.is_value_trap_risk === true || String(a.is_value_trap_risk).toUpperCase() === 'TRUE'),
+      is_value_trap_risk: bool_(a.is_value_trap_risk),
+      suggested_exit_t1_pct: toNum_(a.suggested_exit_t1_pct), suggested_exit_t2_pct: toNum_(a.suggested_exit_t2_pct),
+      valuation_floor: toNum_(a.valuation_floor), floor_downside_pct: toNum_(a.floor_downside_pct),
+      suggested_stop_pct: toNum_(a.suggested_stop_pct),
       mean_reversion_thesis: a.mean_reversion_thesis || '', recovery_catalyst: a.recovery_catalyst || '',
       thesis_invalidation: a.thesis_invalidation || '',
       key_risks: flagsToString_(a.key_risks), worst_case_scenario: a.worst_case_scenario || '',
@@ -2232,8 +2263,8 @@ function calculateConviction_(o, deep) {
   if (health !== null) {
     quality = scale(health, 0, 100, 35);
   } else if (deep) {
-    const roe = toNum_(deep.roe_5yr_avg !== undefined ? deep.roe_5yr_avg : deep.roe_avg_5yr);
-    const pcagr = toNum_(deep.profit_cagr_5yr);
+    const roe = toNum_(deep.roe_5yr_avg);
+    const pcagr = toNum_(deep.profit_cagr_3yr);
     const de = toNum_(deep.debt_to_equity);
     quality =
       (roe === null ? 4 : roe >= 20 ? 14 : roe >= 15 ? 10 : roe >= 12 ? 6 : 2) +

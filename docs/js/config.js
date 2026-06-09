@@ -25,6 +25,7 @@ const ALERT_PRI = {
 };
 
 const VERDICT_PILL = { STRONG: 'green', MODERATE: 'blue', WEAK: 'amber', AVOID: 'red' };
+const VERDICT_TONE = { WORKING: 'green', STOP: 'red', MIXED: 'amber', NO_BENCHMARK: 'amber', TOO_EARLY: 'grey' };
 
 // ── Mutable shared state ────────────────────────────────────────────────────
 let _config = {};            // server config snapshot (paper mode, etc.)

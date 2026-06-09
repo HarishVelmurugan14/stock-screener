@@ -15,6 +15,7 @@ const TAB_PORTFOLIO     = 'SCREENER_PORTFOLIO';
 const TAB_ALERTS        = 'SCREENER_ALERTS';
 const TAB_CONFIG        = 'SCREENER_CONFIG';
 const TAB_DEEP          = 'SCREENER_DEEP_ANALYSIS'; // Claude (LLM) fundamental analysis
+const TAB_CLOSED        = 'SCREENER_CLOSED';        // closed-trade ledger (realised P&L + Nifty alpha)
 const TAB_GF            = '_GF_SCRATCH';   // hidden helper for GOOGLEFINANCE round-trips
 
 // Rate-limit / cache tuning.
@@ -63,7 +64,16 @@ HEADERS[TAB_PORTFOLIO]     = [
   'unrealised_pnl_pct', 'target_1_price', 'target_1_hit',
   'target_2_price', 'target_2_hit', 'stop_loss_price',
   'alert_status', 'days_held', 'annualised_return',
-  'paper_trade', 'notes', 'last_updated'
+  'paper_trade', 'notes', 'last_updated', 'nifty_at_entry'
+];
+// Closed-trade ledger — one row per sale (partial or full), with the Nifty
+// return over the same holding period so alpha (stock_vs_nifty_pct) is measurable.
+HEADERS[TAB_CLOSED]        = [
+  'id', 'symbol', 'company_name', 'sector', 'entry_date', 'exit_date', 'holding_days',
+  'entry_price', 'exit_price', 'quantity', 'invested', 'proceeds',
+  'realised_pnl', 'realised_pnl_pct',
+  'nifty_at_entry', 'nifty_at_exit', 'nifty_return_pct', 'stock_vs_nifty_pct',
+  'exit_reason', 'paper_trade', 'created_at'
 ];
 HEADERS[TAB_ALERTS]        = [
   'alert_date', 'symbol', 'alert_type',
@@ -495,7 +505,7 @@ function setupStockIQ() {
   const summary = { tabsCreated: [], tabsExisting: [], configSeeded: 0, triggers: null };
 
   // 1. Tabs.
-  [TAB_CONFIG, TAB_FUNDAMENTALS, TAB_OPPORTUNITIES, TAB_PORTFOLIO, TAB_ALERTS, TAB_DEEP].forEach(function (name) {
+  [TAB_CONFIG, TAB_FUNDAMENTALS, TAB_OPPORTUNITIES, TAB_PORTFOLIO, TAB_ALERTS, TAB_DEEP, TAB_CLOSED].forEach(function (name) {
     const existed = !!ss_().getSheetByName(name);
     getOrCreateTab_(name);
     ensureHeaders_(name, name === TAB_DEEP); // reconcile columns; deep tab self-clears on schema change
@@ -1526,7 +1536,8 @@ function addPosition(data) {
     target_2_price: t2Price, target_2_hit: false,
     stop_loss_price: slPrice, alert_status: 'HOLD',
     days_held: 0, annualised_return: 0,
-    paper_trade: cfg.paper_trade_mode === true, notes: notes, last_updated: fmtDateTime_(new Date())
+    paper_trade: cfg.paper_trade_mode === true, notes: notes, last_updated: fmtDateTime_(new Date()),
+    nifty_at_entry: niftyLevelNow_()         // benchmark snapshot — enables alpha vs Nifty on exit
   };
   appendRow_(TAB_PORTFOLIO, row);
 
@@ -1629,14 +1640,43 @@ function bookProfit(data) {
     message: 'Booked ' + sellQty + ' of ' + p.symbol + ' @ ₹' + cur + ' (profit ₹' + profit + ').',
     action_required: '', current_price: cur, trigger_price: cur });
 
+  // Closed-trade ledger row with the Nifty benchmark over the holding period.
+  const stockRetPct = entry > 0 ? round2_(((cur - entry) / entry) * 100) : null;
+  const niftyEntry = toNum_(p.nifty_at_entry);
+  const niftyExit = niftyLevelNow_();
+  const niftyRetPct = (niftyEntry && niftyEntry > 0 && niftyExit !== null)
+    ? round2_(((niftyExit - niftyEntry) / niftyEntry) * 100) : null;
+  const alphaPct = (stockRetPct !== null && niftyRetPct !== null) ? round2_(stockRetPct - niftyRetPct) : '';
+  const t1 = toNum_(p.target_1_price), t2 = toNum_(p.target_2_price), sl = toNum_(p.stop_loss_price);
+  const exitReason = (sl !== null && cur <= sl) ? 'STOP'
+    : (t2 !== null && cur >= t2) ? 'TARGET_2'
+    : (t1 !== null && cur >= t1) ? 'TARGET_1' : 'MANUAL';
+  appendRow_(TAB_CLOSED, {
+    id: p.id, symbol: p.symbol, company_name: p.company_name, sector: (getStockMeta_(p.symbol) || {}).sector || '',
+    entry_date: p.entry_date, exit_date: fmtDate_(new Date()), holding_days: daysBetween_(p.entry_date, new Date()),
+    entry_price: entry, exit_price: cur, quantity: sellQty,
+    invested: round2_(entry * sellQty), proceeds: proceeds,
+    realised_pnl: profit, realised_pnl_pct: stockRetPct,
+    nifty_at_entry: (niftyEntry === null ? '' : niftyEntry), nifty_at_exit: (niftyExit === null ? '' : niftyExit),
+    nifty_return_pct: (niftyRetPct === null ? '' : niftyRetPct), stock_vs_nifty_pct: alphaPct,
+    exit_reason: exitReason, paper_trade: cfg.paper_trade_mode === true, created_at: nowISO_()
+  });
+
   let vaultZero = { written: false, reason: 'paper_trade_mode = TRUE' };
   if (cfg.paper_trade_mode !== true) {
     vaultZero = mirrorToVaultZero_('SELL', p.symbol, p.company_name, sellQty, cur, proceeds);
   }
 
-  log_('bookProfit ' + p.symbol + ' sold ' + sellQty + ' @ ' + cur + ' profit ' + profit);
+  log_('bookProfit ' + p.symbol + ' sold ' + sellQty + ' @ ' + cur + ' profit ' + profit + ' (' + exitReason + ')');
   return { success: true, symbol: p.symbol, soldQty: sellQty, price: cur, proceeds: proceeds,
-           profit: profit, remainingQty: remainingQty, vaultZero: vaultZero, timestamp: nowISO_() };
+           profit: profit, remainingQty: remainingQty, exitReason: exitReason,
+           stockVsNiftyPct: alphaPct, vaultZero: vaultZero, timestamp: nowISO_() };
+}
+
+// Current Nifty 50 level (cached via market-health; falls back to a direct GF read).
+function niftyLevelNow_() {
+  try { const h = fetchNifty200DMA(); if (h && h.currentLevel !== null && h.currentLevel !== undefined) return toNum_(h.currentLevel); } catch (e) {}
+  try { const q = gfQuote_('INDEXNSE:NIFTY_50'); return q ? toNum_(q.price) : null; } catch (e) { return null; }
 }
 
 function daysBetween_(fromDate, toDate) {
@@ -1882,6 +1922,48 @@ function getPortfolioData() {
   return { positions: rows, summary: getPortfolioSummary() };
 }
 
+// Track record from closed trades — answers "is this beating a Nifty 50 index?"
+// honestly, with a verdict the user can act on.
+function getClosedSummary() {
+  const cfg = getConfig();
+  const seed = toNum_(cfg.phase_capital_limit) || 25000;
+  const rows = readTabObjects_(TAB_CLOSED).filter(function (r) { return r.symbol; });
+  const trades = rows.length;
+  const wins = rows.filter(function (r) { return (toNum_(r.realised_pnl) || 0) > 0; }).length;
+  const pnlTotal = rows.reduce(function (a, r) { return a + (toNum_(r.realised_pnl) || 0); }, 0);
+  const alphas = rows.map(function (r) { return toNum_(r.stock_vs_nifty_pct); }).filter(function (x) { return x !== null; });
+
+  const winRate = trades ? round2_(wins / trades * 100) : 0;
+  const expectancy = trades ? round2_(pnlTotal / trades) : 0;
+  const returnOnSeed = seed > 0 ? round2_(pnlTotal / seed * 100) : 0;
+  const avgAlpha = alphas.length ? round2_(alphas.reduce(function (a, b) { return a + b; }, 0) / alphas.length) : null;
+
+  let verdict, msg;
+  if (trades < 8) {
+    verdict = 'TOO_EARLY';
+    msg = trades + ' closed trade(s) — need 8+ before judging; keep a Nifty 50 index fund as your base.';
+  } else if (avgAlpha === null) {
+    verdict = 'NO_BENCHMARK';
+    msg = 'No Nifty-at-entry was captured on these trades, so alpha can\'t be measured — trades from now on will have it.';
+  } else if (avgAlpha > 0 && expectancy > 0) {
+    verdict = 'WORKING';
+    msg = 'Edge looks real: +' + avgAlpha + '% average alpha vs Nifty with positive expectancy. Continue.';
+  } else if (avgAlpha <= 0) {
+    verdict = 'STOP';
+    msg = 'A plain Nifty SIP did as well or better (' + avgAlpha + '% avg alpha). Move this money to the index fund.';
+  } else {
+    verdict = 'MIXED';
+    msg = 'Inconclusive — keep trading and re-check later.';
+  }
+
+  return {
+    trades: trades, win_rate_pct: winRate, expectancy_per_trade: expectancy,
+    realised_pnl_total: round2_(pnlTotal), return_on_seed_pct: returnOnSeed,
+    avg_alpha_vs_nifty_pct: avgAlpha, seed_capital: seed, benchmarked_trades: alphas.length,
+    verdict: verdict, verdict_message: msg, timestamp: nowISO_()
+  };
+}
+
 // Mark an alert actioned. data = { created_at } (unique-ish) or {symbol, alert_type}.
 function actionAlert(data) {
   const sh = getOrCreateTab_(TAB_ALERTS);
@@ -2047,6 +2129,7 @@ function handleAction_(action, data) {
       case 'getOpportunityData':     result = getOpportunityData(); break;
       case 'getPortfolioSummary':    result = getPortfolioSummary(); break;
       case 'getPortfolioData':       result = getPortfolioData(); break;
+      case 'getClosedSummary':       result = getClosedSummary(); break;
       case 'getAlerts':              result = getAlerts(); break;
       case 'getConfig':              result = getConfig(); break;
       case 'getMarketHealth':        result = fetchNifty200DMA(); break;

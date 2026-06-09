@@ -542,6 +542,34 @@ function renderBuyPlan() {
   body.innerHTML = html;
 }
 
+// ── Track record (vs Nifty) ─────────────────────────────────────────────────
+async function loadTrack() {
+  try {
+    const d = await api('getClosedSummary');
+    document.getElementById('trackFresh').textContent = d.trades ? d.trades + ' closed' : '';
+    if (!d.trades) {
+      document.getElementById('trackBody').innerHTML =
+        '<div class="sub">No closed trades yet — sell a position and your record vs the Nifty appears here (need 8+ trades to judge).</div>';
+      return;
+    }
+    const tone = VERDICT_TONE[d.verdict] || 'grey';
+    const a = d.avg_alpha_vs_nifty_pct;
+    let html = '<div class="spread mb-12"><span class="pill ' + tone + '">' + d.verdict.replace(/_/g, ' ') + '</span>' +
+      '<span class="sub">' + d.verdict_message + '</span></div>' +
+      '<div class="grid pf-summary">' +
+        statCard('Trades', d.trades) +
+        statCard('Win rate', fmt(d.win_rate_pct, 0) + '%') +
+        statCard('Expectancy/trade', rupee(d.expectancy_per_trade, 0), d.expectancy_per_trade >= 0 ? 'pos' : 'neg') +
+        statCard('Realised P&L', rupee(d.realised_pnl_total, 0), d.realised_pnl_total >= 0 ? 'pos' : 'neg') +
+        statCard('Return on seed', fmt(d.return_on_seed_pct, 1) + '%', d.return_on_seed_pct >= 0 ? 'pos' : 'neg') +
+        statCard('Alpha vs Nifty', a === null ? '—' : (a >= 0 ? '+' : '') + fmt(a, 1) + '%', a === null ? '' : (a >= 0 ? 'pos' : 'neg')) +
+      '</div>';
+    document.getElementById('trackBody').innerHTML = html;
+  } catch (e) {
+    errBox('trackBody', e);
+  }
+}
+
 // ── Portfolio ─────────────────────────────────────────────────────────────
 async function loadPortfolio() {
   try {
@@ -858,7 +886,7 @@ function wireEvents() {
 async function loadAll() {
   const refresh = document.getElementById('refreshAll');
   refresh.disabled = true;
-  await Promise.all([loadHealth(), loadAlerts(), loadOpportunities(), loadPortfolio()]);
+  await Promise.all([loadHealth(), loadAlerts(), loadOpportunities(), loadPortfolio(), loadTrack()]);
   renderBuyPlan();                       // uses the freshly loaded opps + health + capital
   if (_scrLoaded) loadScreener();
   refresh.disabled = false;

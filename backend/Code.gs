@@ -1884,7 +1884,11 @@ function getOpportunityData() {
 
   merged.sort(function (a, b) { return b.final_score - a.final_score; });
   const shortlistN = cfg.max_opportunities || 5;
-  merged.forEach(function (o, i) { o.rank = i + 1; o.shortlisted = i < shortlistN; });
+  merged.forEach(function (o, i) {
+    o.rank = i + 1;
+    o.shortlisted = i < shortlistN;
+    o.rank_reason = rankReason_(o, shortlistN);   // honest "why shortlisted / why benched"
+  });
 
   const analyzed = merged.filter(function (o) { return o.analyzed; });
   const anyConviction = analyzed.some(function (o) { return o.verdict === 'STRONG' || o.verdict === 'MODERATE'; });
@@ -1900,6 +1904,49 @@ function getOpportunityData() {
     noConviction: noConviction,
     lastUpdated: last
   };
+}
+
+// One honest line per card explaining its placement — built from the real
+// drivers (value discount, verdict, reward:risk), not a generic blurb. The
+// shortlist is purely the top `shortlistN` by conviction, so a low-tier name
+// can ride in on rank; this says so plainly instead of implying it's a buy.
+function rankReason_(o, shortlistN) {
+  const d = o.deep || {};
+  const disc = toNum_(d.valuation_discount_pct);
+  const metric = String(d.valuation_metric || '').replace(/_/g, '/');
+  const rr = toNum_(o.risk_reward_ratio);
+  const v = o.verdict;
+  const score = toNum_(o.confidence_score);
+  const cut = shortlistN || 5;
+  const pos = [], neg = [];
+
+  if (disc !== null) {
+    const tail = metric ? (' below 5y ' + metric) : ' below 5y avg';
+    if (disc >= 30)      pos.push('deep value (' + Math.round(disc) + '%' + tail + ')');
+    else if (disc >= 15) pos.push(Math.round(disc) + '%' + tail);
+    else if (disc > 0)   neg.push('shallow discount (' + Math.round(disc) + '%' + tail + ')');
+    else                 neg.push('not cheap vs its own 5y ' + (metric || 'average'));
+  }
+  if (v === 'STRONG')    pos.push('STRONG verdict');
+  else if (v === 'WEAK') neg.push('WEAK verdict');
+
+  if (rr !== null) {
+    if (rr >= 2)     pos.push('strong reward:risk 1:' + (Math.round(rr * 10) / 10));
+    else if (rr < 1) neg.push('poor reward:risk 1:' + (Math.round(rr * 10) / 10));
+  }
+
+  if (!o.shortlisted) {
+    return 'below the top-' + cut + ' cut — ' +
+      (neg.length ? neg.join(', ') : 'lowest conviction of the survivors') +
+      '. Re-analyse; may rotate in.';
+  }
+  if (score !== null && score < 60) {
+    return 'made the cut by rank, not conviction' +
+      (neg.length ? ' — ' + neg.join(', ') : '') + '. Borderline; size small.';
+  }
+  let s = pos.length ? pos.join(' + ') : ('top-' + cut + ' by conviction');
+  if (neg.length) s += '; watch ' + neg.join(', ');
+  return s + '.';
 }
 
 function getAlerts() {

@@ -223,6 +223,10 @@ function oppCard(o) {
         verdictChip + crChip +
       '</div>' +
       '<div class="sub conv-lbl">Conviction · ' + t.blurb + '</div>' +
+      // Why this card sits where it does — straight from the tool response.
+      '<div class="reason ' + (o.shortlisted ? 'place' : 'bench') + '"><b>' +
+        (o.shortlisted ? '★ SHORTLIST #' + o.rank : 'BENCH #' + o.rank) + '</b> ' +
+        (o.rank_reason || '') + '</div>' +
       // Compact stat line.
       '<div class="kpis"><span>PE ' + fmt(o.current_pe, 1) + 'x</span>' +
         '<span class="' + discCls + '">' + discTxt + '</span>' +

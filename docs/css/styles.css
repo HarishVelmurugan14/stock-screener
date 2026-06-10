@@ -310,6 +310,8 @@ h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight:
 .reason.risk { border-left-color: var(--negative); }
 .reason.fund { border-left-color: var(--violet); }
 .reason.none { border-left-color: var(--text-muted); }
+.reason.place { border-left-color: var(--accent); background: var(--accent-dim); }
+.reason.bench { border-left-color: var(--text-muted); background: var(--surface2); }
 
 /* ── Candidate chips (10-name overview) ─────────────────────────────────────── */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
